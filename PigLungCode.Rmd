@@ -21,8 +21,16 @@ require("vegan")
 install.packages("dplyr")
 library(dplyr)
 library(tidyr)
+
+install.packages("phangorn")
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("DECIPHER")
 ```
 
+##Plate 1 and DADA2 Pipeline
 ```{r, set and check filepath, get list of sample names}
 path = "~/PigLungs/MiseqFiles"
 list.files(path)
@@ -193,6 +201,26 @@ require(dada2)
 taxa = assignTaxonomy(seqtab.nochim, "~/PigLungs/silva_nr_v132_train_set.fa.gz", multithread = FALSE)
 saveRDS(taxa, "~/PigLungs/taxa.RDS")
 ```
+##Creation of Phyloseq Object and usage of Decontam for contaminating sequence removal
+
+```{r, make tree}
+library(dada2)
+library(phangorn)
+require(DECIPHER)
+
+seqtab.nochim = readRDS("~/PigLungs/seq.nochim.RDS")
+seqs = getSequences(seqtab.nochim)
+names(seqs) = seqs
+alignment = AlignSeqs(DNAStringSet(seqs), anchor=NA)
+
+phang.align = phyDat(as(alignment, "matrix"), type="DNA")
+dm = dist.ml(phang.align)
+treeNJ = NJ(dm)
+fit = pml(treeNJ, data = phang.align)
+fitGTR <- update(fit, k=4, inv=0.2)
+fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
+                      rearrangement = "stochastic", control = pml.control(trace = 0))
+```
 
 ```{r, create phyloseq object}
 source('http://bioconductor.org/biocLite.R')
@@ -209,7 +237,7 @@ saveRDS(ps, "~/PigLungs/ps.RDS")
 ps = readRDS("~/PigLungs/ps.RDS")
 ```
 
-```{r}
+```{r, usage of decontam to remove contaminating sequences}
 library(devtools)
 devtools::install_github("benjjneb/decontam")
 library(decontam)
@@ -267,7 +295,6 @@ table(contamdf.freq$contaminant)
 ps.Ba.noncontam = prune_taxa(!contamdf.freq$contaminant, ps.Ba)
 
 rm(ps.Ba, ps.BT, ps.PW, ps.PS)
-
 ps.noncontam=merge_phyloseq(ps.BT.noncontam,ps.Ba.noncontam,ps.PW.noncontam,ps.PS.noncontam)
 rm(ps.BT.noncontam,ps.Ba.noncontam,ps.PW.noncontam,ps.PS.noncontam)
 ps.1=prune_species(speciesSums(ps.noncontam) > 0, ps.noncontam)
@@ -424,7 +451,7 @@ WCF.ord=ordinate(ps.WCF.fr, method = "PCoA", distance = "bray")
 plot_ordination(ps.WCF.fr, WCF.ord, type="samples", color = "SampleType", shape = "Sample")
 ```
 
-```{r}
+```{r, creation of NCAT pig relative abundance chart}
 set.seed(100)
 ps.pig=subset_samples(ps.r, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm == "NCAT")
 ps.pig.fr = prune_species(speciesSums(ps.pig) >0, ps.pig)
@@ -439,7 +466,7 @@ ps=readRDS()
 
 ```
 
-```{r, Are there any ASVs shared by all samples?}
+```{r, Are there any ASVs shared by all samples? ASV comparison within NCAT}
 ps.prok.sam = subset_samples(ps.prok, sample_data(ps.prok)$Sample != "NTC" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleName != "NCAT_AIR_BLANK_S73")
 
 ps.prok.samp = prune_species(speciesSums(ps.prok) >0, ps.prok)
@@ -563,7 +590,7 @@ plot_network(NCATnet, ps.NCAT.f, color = "SampleType", label = NULL)
 
 ```
 
-```{r}
+```{r, ASV comparison within WCF}
 ps.WCF.water = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Water")
 ps.WCF.lavage = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Lavage"& sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
 ps.WCF.soil = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Soil"& sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
@@ -646,7 +673,7 @@ p=ggplot(abunddatWCF, aes(x=variable, y=value))+geom_boxplot()+ylab("Relative Ab
 p
 ```
 
-```{r}
+```{r, ASV comparison NCAT w WCF env media}
 #cross env media from WCF with NCAT
 
 A = as.list(colnames(otu_table(ps.WCF.w)))
@@ -712,7 +739,7 @@ p=ggplot(abunddatWCF, aes(x=variable, y=value))+geom_boxplot()+ylab("Relative Ab
 p
 
 
-```{r}
+```{r, ASV comparison of intersecting NCAT and WCF media}
 #cross env media from WCF with NCAT
 
 A = as.list(colnames(otu_table(ps.NCAT.w)))
@@ -766,7 +793,7 @@ AbunDataNCATEnv=cbind(AbunNCATEnv, AirAbun)
 boxplot(AbunDataNCATEnv)
 ```
 
-```{r, local vs other air}
+```{r, local vs other air ASV comparison}
 A = as.list(colnames(otu_table(ps.NCAT.a)))
 
 B = as.list(colnames(otu_table(ps.NCAT.t)))
@@ -848,7 +875,7 @@ plot(betadis.NCAT)
 ```
 
 
-```{r, are there bacteria associated with any individual sample type within the pig lung}
+```{r, are there bacteria associated with any individual sample type within the pig lung NCAT}
 ps.NCAT.p=subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$Sample=="Pig")
 ps.NCAT.pig = prune_species(speciesSums(ps.NCAT.p) >0, ps.NCAT.p)
 rm(ps.NCAT.p)
@@ -877,7 +904,7 @@ ggplot(LEfsERes)
 
 ```
 
-```{r}
+```{r, Lefse object for WCF Pig}
 ps.WCF.p=subset_samples(ps.WCF.r, sample_data(ps.WCF.r)$Sample=="Pig")
 ps.WCF.pig = prune_species(speciesSums(ps.WCF.p) >0, ps.WCF.p)
 rm(ps.WCF.p)
@@ -902,7 +929,7 @@ rm(lefse.pig)
 write.csv(lefse.out, "~/PigLungs/lefsepigWCF.csv", quote = FALSE)
 ```
 
-```{r}
+```{r, LEFSE object for soils}
 ps.soils=subset_samples(ps.r, sample_data(ps.r)$SampleType=="Soil")
 ps.soil.p = prune_species(speciesSums(ps.soils) >0, ps.soils)
 rm(ps.soils)
@@ -928,7 +955,7 @@ rm(lefse.soil)
 write.csv(lefse.out, "~/PigLungs/lefsesoil.csv", quote = FALSE)
 ```
 
-```{r}
+```{r, LEFSE object for swabs}
 ps.swab=subset_samples(ps.r, sample_data(ps.r)$SampleType=="Swab")
 ps.swabs = prune_species(speciesSums(ps.swab) >0, ps.swab)
 rm(ps.swab)
@@ -1003,30 +1030,6 @@ p
 ```
 
 
-```{r}
-require("RVAideMemoire")
-
-BetaFish=readRDS("~/BetaFish.RDS")
-newphyloPCoA2 = readRDS("~/newphyloPCoA2.RDS")
-
-pairwise.perm.manova(BetaFish, newphyloPCoA2$ExptlTimePoint, test = "Wilks", nperm = 999, p.method = "holm")
-
-require("vegan")
-
-simper(BetaFish, newphyloPCoA2$ExptlTimePoint, permutations = 50, parallel = 1)
-
-```
-
-```{r}
-install.packages("heatmaply")
-library(heatmaply)
-install.packages("plotly")
-library(plotly)
-webshot::install_phantomjs()
-
-heatmap=heatmaply(genus_matrixR, colors = BrBG, grid_color = "black", Colv=NULL, file="C:/Users/Alex/Downloads/LEfSeheatmap.pdf")
-```
-
 ```{r, attempt to create an input object for picrust2}
 library(biomformat)
 ps.prok = readRDS("~/PigLungs/ps.prok.RDS") #has 18,457 ASVs
@@ -1098,7 +1101,7 @@ prune_species(speciesSums(.) > 0, .)
 write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s9")
 ```
 
-```{bash}
+```{bash, bash input for sourcetracker}
 #set filepaths in environment
 echo "export SOURCETRACKER_PATH=$HOME/Documents/PigLungs/sourcetracker" >> ~/.bash_profile
 source ~/.bash_profile
@@ -1109,7 +1112,7 @@ source ~/.bash_profile
 Rscript sourcetracker_for_qiime.r -i NCAT_lavage_sourcetracker_ASV_table.txt -m NCAT_lavage_sourcetracker_sample_data.txt -o lavage_full_NCAT -v -n 25
 ```
 
-```{r}
+```{r, aggregation of sourcetracker txt files into dataframe}
 tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t")
 
 tissue_ST_avg = tissue_ST %>% 
@@ -1153,7 +1156,7 @@ STDF$Group=factor(STDF$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "
 ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
 ```
 
-```{r}
+```{r, aggregation of sourcetracker txt files into dataframe}
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample3_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
@@ -1226,8 +1229,7 @@ GradDF$variable=factor(GradDF$variable,levels=c("Food","Water", "Soil", "Unknown
 p=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = GradDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
 ```
 
-
-```{r}
+```{r, script to generate biome file?}
 
 #function sourced from itsmisterbrown/microfiltR github
 
@@ -2144,4 +2146,3 @@ write.dataset <- function(ps, filePATH, filePREFIX, writeFASTA=TRUE, rename=FALS
 
 
 ```
-
