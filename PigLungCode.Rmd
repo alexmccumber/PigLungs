@@ -3,10 +3,6 @@ title: "PigLungCode"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 ```{r, setup and loading packages}
 source("http://bioconductor.org/biocLite.R")
 biocLite(suppressUpdates = FALSE)
@@ -21,13 +17,21 @@ require("vegan")
 install.packages("dplyr")
 library(dplyr)
 library(tidyr)
-
+library(phyloseq)
+library(ggplot2)
+install.packages("picante")
+library(picante)
+library(stringr)
+library(grid)
+install.packages("gridExtra")
+library(gridExtra)
 install.packages("phangorn")
 
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 
 BiocManager::install("DECIPHER")
+BiocManager::install("dada2", version = "3.10")
 ```
 
 ##Plate 1 and DADA2 Pipeline
@@ -201,26 +205,44 @@ require(dada2)
 taxa = assignTaxonomy(seqtab.nochim, "~/PigLungs/silva_nr_v132_train_set.fa.gz", multithread = FALSE)
 saveRDS(taxa, "~/PigLungs/taxa.RDS")
 ```
-##Creation of Phyloseq Object and usage of Decontam for contaminating sequence removal
 
-```{r, make tree}
+##Creation of tree
+
+```{r, make list of sequences in fasta file for tree making}
 library(dada2)
-library(phangorn)
+require(phangorn)
 require(DECIPHER)
 
 seqtab.nochim = readRDS("~/PigLungs/seq.nochim.RDS")
-seqs = getSequences(seqtab.nochim)
-names(seqs) = seqs
-alignment = AlignSeqs(DNAStringSet(seqs), anchor=NA)
-
-phang.align = phyDat(as(alignment, "matrix"), type="DNA")
-dm = dist.ml(phang.align)
-treeNJ = NJ(dm)
-fit = pml(treeNJ, data = phang.align)
-fitGTR <- update(fit, k=4, inv=0.2)
-fitGTR <- optim.pml(fitGTR, model="GTR", optInv=TRUE, optGamma=TRUE,
-                      rearrangement = "stochastic", control = pml.control(trace = 0))
+uniques=getUniques(seqtab.nochim)
+sequences=names(uniques)
+uniquesToFasta(uniques,fout = "~/pigs.fasta", ids=sequences)
 ```
+
+```{bash, make a tree with SEPP using gg backbone tree}
+wget  "https://raw.github.com/smirarab/sepp-refs/master/gg/sepp-package.tar.bz"
+
+tar xvfj sepp-package.tar.bz
+
+cd sepp-package/sepp
+python setup.py config -c
+
+./sepp-package/run-sepp.sh pigs.fasta pigs
+```
+
+```{r, view tree file with ggtree}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("ggtree")
+
+library(ape)
+pig.tree = read.tree(file = "~/PigLungs/pigs_placement.tog.relabelled.tre") %>%
+  keep.tip(., sequences)
+```
+
+
+##Creation of Phyloseq Object and usage of Decontam for contaminating sequence removal
 
 ```{r, create phyloseq object}
 source('http://bioconductor.org/biocLite.R')
@@ -229,12 +251,17 @@ require(phyloseq)
 rownames(PigLungMetaData)=PigLungMetaData$SampleName
 SampleData=data.frame(PigLungMetaData)
 
-ps = phyloseq(otu_table(seq.nochim, taxa_are_rows=FALSE), 
+ps = phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE), 
                sample_data(SampleData), 
                tax_table(taxa))
+
 saveRDS(ps, "~/PigLungs/ps.RDS")
 
 ps = readRDS("~/PigLungs/ps.RDS")
+
+ps1 = merge_phyloseq(ps, pig.tree)
+
+saveRDS(ps1, "~/PigLungs/pstree.RDS")
 ```
 
 ```{r, usage of decontam to remove contaminating sequences}
@@ -314,16 +341,23 @@ head(which(contamdf.freq$contaminant))
 plot_frequency(ps, taxa_names(ps)[c(55,2)], conc = "Qbit2") + xlab("DNA Concentration")
 ```
 
-
-```{r, read in phyloseq object and subset samples}
+```{r}
 ps=readRDS("~/PigLungs/ps.RDS")
 #remove all ASVs that aren't bacteria
 ps.prok=subset_taxa(ps.1, Kingdom == "Bacteria")
 saveRDS(ps.prok, "~/PigLungs/ps.prok.RDS")
 
 ps.prok=readRDS("~/PigLungs/ps.prok.RDS")
+```
 
-#Check rarefaction and number of counts for each sample
+
+##Creation of tree
+
+```{r, make list of sequences in fasta file for tree making}
+library(dada2)
+require(phangorn)
+require(DECIPHER)
+
 vegan_otu <- function(physeq) {
     OTU <- otu_table(physeq)
     if (taxa_are_rows(OTU)) {
@@ -332,6 +366,42 @@ vegan_otu <- function(physeq) {
     return(as(OTU, "matrix"))
 }
 
+uniques=getUniques(vegan_otu(ps.prok))
+sequences=names(uniques)
+uniquesToFasta(uniques,fout = "~/pigs.fasta", ids=sequences)
+```
+
+```{bash, make a tree with SEPP using gg backbone tree}
+wget  "https://raw.github.com/smirarab/sepp-refs/master/gg/sepp-package.tar.bz"
+
+tar xvfj sepp-package.tar.bz
+
+cd sepp-package/sepp
+python setup.py config -c
+
+./sepp-package/run-sepp.sh pigs.fasta pigs
+```
+
+```{r, view tree file with ggtree}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("ggtree")
+
+library(ape)
+pig.tree = read.tree(file = "~/PigLungs/pigs_placement.tog.relabelled.tre") %>%
+  keep.tip(., sequences)
+```
+
+```{r}
+ps.tree = merge_phyloseq(ps.prok, pig.tree)
+```
+
+
+##Data Analysis
+
+```{r, read in phyloseq object and subset samples}
+#Check rarefaction and number of counts for each sample
 otu.Prok=vegan_otu(ps.prok)
 
 SampleDF = as.data.frame(sample_data(ps.prok))
@@ -344,7 +414,7 @@ rm(SampleDF, SampleSums)
 
 SampleDF.merged = SampleDF.merged[order(SampleDF.merged$SampleSums),]
 
-ps.r=transform_sample_counts(ps.prok,function(x) x/sum(x))
+ps.r=transform_sample_counts(ps.tree,function(x) x/sum(x))
 
 ps.WCF = subset_samples(ps.r, sample_data(ps.r)$Farm == "WCF")
 ps.WCF.r = prune_species(speciesSums(ps.WCF)>0, ps.WCF)
@@ -380,52 +450,147 @@ pig.ord=ordinate(ps.prok.Ts, method = "NMDS", distance = "bray")
 plot_ordination(ps.prok.Ts, pig.ord, type="samples", color = "SampleSubtype", shape = "PigGender")
 ```
 
-```{r, make NDMS for all samples}
+```{r, make PCoA for all samples with unifrac}
 ps.rnc=subset_samples(ps.r, sample_data(ps.r)$Sample != "NTC")
 ps.rncp = prune_species(speciesSums(ps.rnc) > 0, ps.rnc)
 rm(ps.rnc)
 
-all.ord=ordinate(ps.rncp, method = "NMDS", distance = "canberra")
-plot_ordination(ps.rncp, all.ord, type="samples", color = "Sample", shape = "Farm")+stat_ellipse()
+saveRDS(ps.rncp, "~/PigLungs/ps_ord.RDS")
+
+p=ordinate(ps.rncp, method = "PCoA", distance = "unifrac") %>%
+plot_ordination(ps.rncp, ., type="samples", color = "Sample", shape = "Farm")+stat_ellipse()
 
 p
 ```
 
 
-```{r, create NCAT }
+```{r, create ordination for individual farms}
 require(ggplot2)
-ps.NCAT.rc = subset_samples(ps.r, sample_data(ps.r)$Farm == "NCAT") #& sample_data(ps.r)$Sample == "Environment")
+ps.NCAT = subset_samples(ps.rncp, sample_data(ps.rncp)$Farm == "NCAT") 
 
-ps.NCAT.fr = prune_species(speciesSums(ps.NCAT.rc) > 0, ps.NCAT.rc)
-ps.NCAT.fr5=filter_taxa(ps.NCAT.fr, function(x) mean(x) >1e-2, TRUE)
-plot_bar(ps.NCAT.fr5)+facet_grid(SampleType~.)
-rm(ps.NCAT.rc)
+ordinate(ps.NCAT, method = "PCoA", distance = "unifrac") %>%
+  plot_ordination(ps.NCAT, ., type="samples", color = "SampleType", shape = "Sample")
+
+ps.WCF = subset_samples(ps.rncp, sample_data(ps.rncp)$Farm == "WCF")
+
+ordinate(ps.WCF, method = "PCoA", distance = "unifrac") %>%
+  plot_ordination(ps.WCF, ., type="samples", color = "SampleType", shape = "Sample")
+
+#keep the environment clean
+rm(ps.NCAT, ps.WCF)
 ```
 
-```{r}
-set.seed(100)
-NCAT.ord=ordinate(ps.NCAT.fr, method = "NMDS", distance = "canberra")
-plot_ordination(ps.NCAT.fr, NCAT.ord, type="samples", color = "SampleType", shape = "Sample")
-plot_bar(ps.NCAT.fr, "SampleName", "Abundance", "Kingdom", facet_grid = "SampleType")
+```{r, look at alpha diversity values for the samples}
+install.packages("picante")
+library(picante)
+#get Faith for NCAT
+ps.alpha=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Pig") %>%
+  prune_species(speciesSums(.) > 0, .)
 
-WCF.ord=ordinate(ps.WCF.r, method = "NMDS", distance = "bray")
-plot_ordination(ps.WCF.r, WCF.ord, type = "samples",color ="Sample")
+sample = vegan_otu(ps.alpha)
+tree = phy_tree(ps.alpha)
+
+pd.result = pd(sample, tree)
+
+pd.result$Samples = rownames(pd.result)
+
+PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
+  mutate(SampleType = str_replace(SampleType, "T", "Tissue")) %>% 
+  mutate(SampleType = str_replace(SampleType, "L", "Lavage")) %>% 
+  mutate(SampleType = str_replace(SampleType, "S", "Swab"))
+
+rm(sample, tree, pd.result)
+
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
+
+Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
+
+Shannon.result$Samples = rownames(Shannon.result)
+
+Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
+  mutate(SampleType = str_replace(SampleType, "T", "Tissue")) %>% 
+  mutate(SampleType = str_replace(SampleType, "L", "Lavage")) %>% 
+  mutate(SampleType = str_replace(SampleType, "S", "Swab"))
+
+rm(Shannon.result)
+
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
+
+grid.arrange(g1, g2, nrow = 1)
+
+g=arrangeGrob(g1,g2,nrow=1)
+
+ggsave(file="~/PigLungs/LungalphaDiv.png", g, width = 20, height = 10, units = "cm")
 ```
 
-```{r}
-ps.alphaNCAT=subset_samples(ps.prok, sample_data(ps.prok)$Sample == "Pig" & sample_data(ps.prok)$Farm == "NCAT")
-p=plot_richness(ps.alphaNCAT, measures = c("Observed", "Shannon"), color = "SampleType", x = "SampleType")
+```{r, look at alpha diversity values for the environment samples across farms}
+ps.alpha=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
+  prune_species(speciesSums(.) > 0, .)
 
-ps.NCAT.rc = subset_samples(ps.prok.samp, sample_data(ps.prok.samp)$Farm == "NCAT")
+sample = vegan_otu(ps.alpha)
+tree = phy_tree(ps.alpha)
 
-ps.NCAT.rc.l = subset_samples(ps.prok.samp, sample_data(ps.prok.samp)$SampleType == "Swab")
-ps.NCAT.rc.fl = prune_species(speciesSums(ps.NCAT.rc.l) > 0, ps.NCAT.rc.l)
+pd.result = pd(sample, tree)
 
-ps.rare=prune_samples(sample_sums(ps.NCAT.rc.fl)<=200, ps.NCAT.rc.fl) 
+pd.result$Samples = rownames(pd.result)
 
+PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
+  mutate(SampleType = str_replace(SampleType, "W", "Water")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FWater", "Water")) %>%
+  mutate(SampleType = str_replace(SampleType, "MWater", "Water")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FF", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "MF", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FOOD1", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FOOD2", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FOOD3", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "AIR", "Air")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FS", "Soil")) %>% 
+  mutate(SampleType = str_replace(SampleType,"MS", "Soil"))%>% 
+  mutate(SampleType = str_replace(SampleType, "SOIL1", "Soil"))%>% 
+  mutate(SampleType = str_replace(SampleType, "SOIL2", "Soil"))
 
-vegan.T=vegan_otu(ps.rare)
-rarecurve(vegan.T, step = 20)
+rm(sample, tree, pd.result)
+
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
+
+Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
+
+Shannon.result$Samples = rownames(Shannon.result)
+
+Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
+  mutate(SampleType = str_replace(SampleType, "W", "Water")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FWater", "Water")) %>%
+  mutate(SampleType = str_replace(SampleType, "MWater", "Water")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FF", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "MF", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "FOOD1", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FOOD2", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FOOD3", "Food")) %>% 
+  mutate(SampleType = str_replace(SampleType, "AIR", "Air")) %>% 
+  mutate(SampleType = str_replace(SampleType,"FS", "Soil")) %>% 
+  mutate(SampleType = str_replace(SampleType,"MS", "Soil"))%>% 
+  mutate(SampleType = str_replace(SampleType, "SOIL1", "Soil"))%>% 
+  mutate(SampleType = str_replace(SampleType, "SOIL2", "Soil"))
+
+rm(Shannon.result)
+
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
+
+grid.arrange(g1, g2, nrow = 1)
+```
+
+```{r, sample code from cell phone}
+glom.NCAT=tax_glom(ps.NCAT.f, taxrank = "Genus")
+
+require("vegan")
+
+vegandist.NCAT = vegdist(vegan_otu(ps.NCAT.f), "bray")
+betadis.NCAT=betadisper(vegandist.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "centroid")
+anova(betadis.NCAT)
+TukeyHSD(betadis.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "median")
+plot(betadis.NCAT)
+
+#adonis(otu_table(ps.NCAT.f)~SampleType*CollectionTime, permutations = 999, data=cellCdr, parralell = 4))
 ```
 
 ```{r}
@@ -437,33 +602,19 @@ require(ggplot2)
 p=ggplot(UpperLower, aes(x=Genus,y=LDAScore))+geom_col(aes(fill=Location))+coord_flip()
 ```
 
-```{r}
-ps.WCF = subset_samples(ps.r, sample_data(ps.r)$Farm == "WCF")
-
-ps.WCF.r = transform_sample_counts(ps.WCF, function(x) x / sum(x) )
-ps.WCF.fr=prune_species(speciesSums(ps.WCF.r) > 0,ps.WCF.r)
-rm(ps.WCF,ps.WCF.r)
-```
-
-```{r}
-set.seed(100)
-WCF.ord=ordinate(ps.WCF.fr, method = "PCoA", distance = "bray")
-plot_ordination(ps.WCF.fr, WCF.ord, type="samples", color = "SampleType", shape = "Sample")
-```
-
 ```{r, creation of NCAT pig relative abundance chart}
 set.seed(100)
-ps.pig=subset_samples(ps.r, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm == "NCAT")
-ps.pig.fr = prune_species(speciesSums(ps.pig) >0, ps.pig)
-rm(ps.pig)
-pig.ord=ordinate(ps.pig.fr, method = "NMDS", distance = "bray")
-plot_ordination(ps.pig.fr, pig.ord, type = "samples", shape = "Farm", color = "SampleType")
-glom.pig=tax_glom(ps.pig.fr, taxrank = "Phylum")
-glom.pig.f = prune_species(speciesSums(glom.pig) >2e-1, glom.pig)
-plot_bar(glom.pig.f, fill = "Phylum")
+subset_samples(ps.rncp, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm == "NCAT") %>%
+  prune_species(speciesSums(.) >0, .) %>%
+  tax_glom(., taxrank = "Phylum") %>%
+  prune_species(speciesSums(.) >2e-1, .) %>%
+  plot_bar(., fill = "Phylum")
 
-ps=readRDS()
-
+subset_samples(ps.rncp, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm == "WCF") %>%
+  prune_species(speciesSums(.) >0, .) %>%
+  tax_glom(., taxrank = "Phylum") %>%
+  prune_species(speciesSums(.) >2e-1, .) %>%
+  plot_bar(., fill = "Phylum")
 ```
 
 ```{r, Are there any ASVs shared by all samples? ASV comparison within NCAT}
@@ -725,20 +876,6 @@ rownames(AbunWCFEnv.NCATL)=samplenames
 AbunDataWCFEnvxNCATL=cbind(AbunWCFEnv.NCATL, AirAbun)
 ```
 
-library("reshape2")
-
-abunddatWCF=melt(AbunDataWCF)
-
-library("ggplot2")
-install.packages("ggthemes")
-library(ggthemes)
-install.packages("dplyr")
-library(dplyr)
-p=ggplot(abunddatWCF, aes(x=variable, y=value))+geom_boxplot()+ylab("Relative Abundance")+xlab("Media")
-
-p
-
-
 ```{r, ASV comparison of intersecting NCAT and WCF media}
 #cross env media from WCF with NCAT
 
@@ -849,31 +986,6 @@ write.csv(AbunWCFEnv, "~/PigLungs/AbunWCFEnv.csv")
 
 boxplot(AbunWCFEnv)
 ```
-
-
-```{r}
-ps.NTC=subset_samples(ps, sample_data(ps)$Sample == "NTC" & sample_data(ps)$SampleType != "Swab")
-ps.NTC.r = prune_species(speciesSums(ps.NTC) >0, ps.NTC)
-rm(ps.NTC)
-ps.NTC = transform_sample_counts(ps.NTC.r, function(x) ifelse(x>0,1,0))
-ps.NTC.a = filter_taxa(ps.NTC, function(x) sum(x) >= 0.5*(length(x)), TRUE)
- 
-```
-
-```{r, sample code from cell phone}
-glom.NCAT=tax_glom(ps.NCAT.f, taxrank = "Genus")
-
-require("vegan")
-
-vegandist.NCAT = vegdist(vegan_otu(ps.NCAT.f), "bray")
-betadis.NCAT=betadisper(vegandist.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "centroid")
-anova(betadis.NCAT)
-TukeyHSD(betadis.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "median")
-plot(betadis.NCAT)
-
-#adonis(otu_table(ps.NCAT.f)~SampleType*CollectionTime, permutations = 999, data=cellCdr, parralell = 4))
-```
-
 
 ```{r, are there bacteria associated with any individual sample type within the pig lung NCAT}
 ps.NCAT.p=subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$Sample=="Pig")
