@@ -26,6 +26,8 @@ library(grid)
 install.packages("gridExtra")
 library(gridExtra)
 install.packages("phangorn")
+install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+library(pairwiseAdonis)
 
 if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
@@ -393,10 +395,9 @@ pig.tree = read.tree(file = "~/PigLungs/pigs_placement.tog.relabelled.tre") %>%
   keep.tip(., sequences)
 ```
 
-```{r}
+```{r, merge tree with phyloseq object}
 ps.tree = merge_phyloseq(ps.prok, pig.tree)
 ```
-
 
 ##Data Analysis
 
@@ -464,37 +465,54 @@ p
 
 #look at PERMANOVA to see if statistically different
 metadf = data.frame(sample_data(ps.rncp))
-
+metadf=unite(metadf, FarmSample, c(Farm, Sample), remove = F)
 unifrac.dist = UniFrac(ps.rncp)
 
-permanova = adonis(unifrac.dist ~ Farm*Sample, data = metadf)
+permanova = adonis(unifrac.dist ~ FarmSample, data = metadf)
 
 permanova
-```
 
+pairwise.adonis(unifrac.dist, metadf$FarmSample) #pairwise testing with adonis shows that composition of each group is significantly different from each other, p-value bonferonni corrected
+```
 
 ```{r, create ordination for individual farms}
 require(ggplot2)
-ps.NCAT = subset_samples(ps.rncp, sample_data(ps.rncp)$Farm == "NCAT") 
 
-ordinate(ps.NCAT, method = "PCoA", distance = "unifrac") %>%
-  plot_ordination(ps.NCAT, ., type="samples", color = "SampleType", shape = "Sample")
+ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment") 
 
-ps.WCF = subset_samples(ps.rncp, sample_data(ps.rncp)$Farm == "WCF")
+ordinate(ps.Env, method = "PCoA", distance = "unifrac") %>%
+  plot_ordination(ps.Env, ., type="samples", color = "SampleType", shape = "Farm")
 
-ordinate(ps.WCF, method = "PCoA", distance = "unifrac") %>%
-  plot_ordination(ps.WCF, ., type="samples", color = "SampleType", shape = "Sample")
+ps.Pig = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Pig")
 
-NCATmeta = data.frame(sample_data(ps.NCAT))
+ordinate(ps.Pig, method = "PCoA", distance = "unifrac") %>%
+  plot_ordination(ps.Pig, ., type="samples", color = "SampleType", shape = "Farm")
 
-unifrac.dist = UniFrac(ps.NCAT)
+Envmeta = data.frame(sample_data(ps.Env))
 
-permanova = adonis(unifrac.dist ~ Sample*SampleSubtype, data = NCATmeta)
+unifrac.dist = UniFrac(ps.Env)
+
+permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Envmeta) #permanova shows significant differences in farm*SampleType but pairwise testing with p value correction indicates that between the two farms none of the same samples are significantly different
 
 permanova
 
+Envmeta=unite(Envmeta, FarmSample, c(Farm, SampleType), remove = F)
+
+pairwise.adonis(unifrac.dist, Envmeta$FarmSample)
+
+Pigmeta = data.frame(sample_data(ps.Pig)) %>%
+  unite(., FarmSample, c(Farm, SampleType), remove = F)
+
+unifrac.dist = UniFrac(ps.Pig)
+
+permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Pigmeta)
+
+permanova
+
+pairwise.adonis(unifrac.dist, Pigmeta$FarmSample) #Tissue samples are significantly different (adjusted p=0.015), Swab as well (p=0.015), and Lavage (p=0.015)
+
 #keep the environment clean
-rm(ps.NCAT, ps.WCF)
+rm(ps.Pig, ps.Env)
 ```
 
 ```{r, look at alpha diversity values for the samples}
@@ -1151,21 +1169,6 @@ write.csv(lefse.out, "~/PigLungs/lefseswab.csv", quote = FALSE)
 ```
 
 ```{r}
-pigdr=sample_data(ps.NCAT.fr)
-BetaPig=vegdist(vegan_otu(ps.NCAT.fr), "bray")
-PigDist=betadisper(BetaPig, group = pigdr$SampleType, type = "median")
-anova(PigDist)
-TukeyHSD(PigDist, group = pigdr$SampleType, type = "median")
-
-pigdr = sample_data(ps.NCAT.pig)
-BetaPig=vegdist(vegan_otu(ps.NCAT.pig), "bray")
-PigDist=betadisper(BetaPig, group= pigdr$SampleType, type="median")
-boxplot(PigDist)
-anova(PigDist)
-TukeyHSD(PigDist, group = pigdr$SampleType, type = "median")
-```
-
-```{r}
 Uppsamp.ps=subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$Sample == "Pig" & sample_data(ps.NCAT.fr) != "NTC")
 sample_names(Uppsamp.ps)
 
@@ -1223,7 +1226,7 @@ piggy_fasta=dada2::uniquesToFasta(prok.100, fout = "~/PigLungs/piggy.fasta", ids
 head(piggy_fasta)
 ```
 
-```{r, attempt at SourceTracker for NCAT}
+```{r, attempt at SourceTracker for NCAT, not using this analysis}
 #run
 ps.NCAT = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleSubtype != "NTC" & sample_data(ps.prok)$SampleSubtype != "Blank")
 
@@ -1299,19 +1302,28 @@ write.dataset(ps.WCF_Tissue, "~/PigLungs/sourcetracker/", "WCF_tissue_sourcetrac
 ##Make boxplots for this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ```{r, aggregation of sourcetracker txt files into dataframe}
-tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t")
-
-tissue_ST_avg = tissue_ST %>% 
+tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
-  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID)))
+
+tissue_ST_all = tissue_ST %>%
+  mutate(., sampletype = "tissue") %>%
+  unite(., Group, group, sampletype) %>%
+  select(., -SampleID)
+  
+tissue_ST_avg = tissue_ST %>%
   group_by(group) %>%
   summarise_each(., funs(mean)) %>%
   mutate(., sampletype = "tissue") %>%
   unite(., Group, group, sampletype) %>%
   select(., -SampleID)
   
-lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_NCAT/sink_predictions.txt",header = T, sep = "\t")
+lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>%
+  mutate(.,Group = "lavage")
+
+lavage_ST_all = lavage_ST %>%
+  select(., -SampleID)
 
 lavage_ST_avg=lavage_ST %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
@@ -1319,30 +1331,44 @@ lavage_ST_avg=lavage_ST %>%
   mutate(., Group = "lavage") %>%
   select(., -c(farm, plateID, SampleID, sampletype))
 
-swab_ST=read.table("~/PigLungs/sourcetracker/swab_full_NCAT/sink_predictions.txt",header = T, sep = "\t")
-
-swab_ST_avg = swab_ST %>% 
+swab_ST=read.table("~/PigLungs/sourcetracker/swab_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
-  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+swab_ST_all = swab_ST %>%
+  mutate(., sampletype = "swab") %>%
+  unite(., Group, group, sampletype) %>%
+  select(., -SampleID)
+
+swab_ST_avg = swab_ST %>%
   group_by(group) %>%
   summarise_each(., funs(mean)) %>%
   mutate(., sampletype = "swab") %>%
   unite(., Group, group, sampletype) %>%
   select(., -SampleID)
 
-STDF = bind_rows(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) %>%
-  mutate(., Swab.Lavage = 0) %>%
+STDF_avg = bind_rows(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) %>%
+  #mutate(., Swab.Lavage = 0) %>%
   reshape2::melt(.)
 
-STDF$variable=factor(STDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
+STDF$variable=factor(STDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
 
 STDF$Group=factor(STDF$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
 
-ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+
+STDF_all = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
+  reshape2::melt(.)
+
+STDF_all$variable=factor(STDF_all$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
+
+STDF_all$Group=factor(STDF_all$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
+
+ggplot(STDF_all, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
 ```
 
-```{r, aggregation of sourcetracker txt files into dataframe}
+```{r, aggregation of sourcetracker txt files into dataframe, not using this analysis}
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample3_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
