@@ -461,6 +461,15 @@ p=ordinate(ps.rncp, method = "PCoA", distance = "unifrac") %>%
 plot_ordination(ps.rncp, ., type="samples", color = "Sample", shape = "Farm")+stat_ellipse()
 
 p
+
+#look at PERMANOVA to see if statistically different
+metadf = data.frame(sample_data(ps.rncp))
+
+unifrac.dist = UniFrac(ps.rncp)
+
+permanova = adonis(unifrac.dist ~ Farm*Sample, data = metadf)
+
+permanova
 ```
 
 
@@ -475,6 +484,14 @@ ps.WCF = subset_samples(ps.rncp, sample_data(ps.rncp)$Farm == "WCF")
 
 ordinate(ps.WCF, method = "PCoA", distance = "unifrac") %>%
   plot_ordination(ps.WCF, ., type="samples", color = "SampleType", shape = "Sample")
+
+NCATmeta = data.frame(sample_data(ps.NCAT))
+
+unifrac.dist = UniFrac(ps.NCAT)
+
+permanova = adonis(unifrac.dist ~ Sample*SampleSubtype, data = NCATmeta)
+
+permanova
 
 #keep the environment clean
 rm(ps.NCAT, ps.WCF)
@@ -521,6 +538,26 @@ grid.arrange(g1, g2, nrow = 1)
 g=arrangeGrob(g1,g2,nrow=1)
 
 ggsave(file="~/PigLungs/LungalphaDiv.png", g, width = 20, height = 10, units = "cm")
+
+#comparison of alpha diversities at each farm for the pig smaples
+fit = aov(PD ~ Farm*SampleType, data =  PD)
+plot(fit)
+
+#data looks right skewed in plot, so using Shapiro-Wilk test to determine if normally distributed
+shapiro.test(PD$PD) #p<0.05 so data is not normally distrubted and ANOVA would be incorrectly applied
+PD=unite(PD, FarmSample, c(Farm, SampleType), remove = F) #want to do farm by sample so making new column for kruskal test
+
+kruskal.test(PD ~ FarmSample, data = PD)
+pairwise.wilcox.test(PD$PD, PD$FarmSample, p.adjust.method = "BH") #only swab samples between farms are different
+
+kruskal.test(PD ~ SampleType, data = PD)
+pairwise.wilcox.test(PD$PD, PD$SampleType, p.adjust.method = "BH") #indicates Tissue samples are different from lavage and swab but lavage and swab are not different
+
+fit = aov(Shannon ~ Farm*SampleType, data = Shannon)
+plot(fit)
+shapiro.test(Shannon$Shannon) # p=0.24 so data is normally distributed
+
+summary(fit) #indicates there is no significant difference by Farm, SampleType, or Farm*SampleType
 ```
 
 ```{r, look at alpha diversity values for the environment samples across farms}
@@ -577,6 +614,26 @@ rm(Shannon.result)
 g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
 
 grid.arrange(g1, g2, nrow = 1)
+
+fit = aov(PD ~ Farm*SampleType, data =  PD)
+plot(fit)
+
+#data looks right skewed in plot, so using Shapiro-Wilk test to determine if normally distributed
+shapiro.test(PD$PD) #p<0.05 so data is not normally distrubted and ANOVA would be incorrectly applied
+PD=unite(PD, FarmSample, c(Farm, SampleType), remove = F) #want to do farm by sample so making new column for kruskal test
+
+kruskal.test(PD ~ FarmSample, data = PD) #p=0.24 so none of the medians are different between the Farm*SampleType
+
+kruskal.test(PD ~ SampleType, data = PD) #p=0.177 so none of the medians are different between SampleTypes
+
+pairwise.wilcox.test(PD$PD, PD$Farm, p.adjust.method = "BH") #p=0.075 so shows there is no difference between farms 
+
+fit = aov(Shannon ~ Farm*SampleType, data = Shannon)
+plot(fit)
+shapiro.test(Shannon$Shannon) # p=0.1 so data is normally distributed
+
+summary(fit) #indicates there is a significant differnce by SampleType with differences being Food-Air (0.03), Soil-Food (0.005), Water-Food (0.014)
+TukeyHSD(fit)
 ```
 
 ```{r, sample code from cell phone}
@@ -1166,7 +1223,7 @@ piggy_fasta=dada2::uniquesToFasta(prok.100, fout = "~/PigLungs/piggy.fasta", ids
 head(piggy_fasta)
 ```
 
-```{r, attempt at SourceTracker}
+```{r, attempt at SourceTracker for NCAT}
 #run
 ps.NCAT = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleSubtype != "NTC" & sample_data(ps.prok)$SampleSubtype != "Blank")
 
@@ -1213,7 +1270,7 @@ prune_species(speciesSums(.) > 0, .)
 write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s9")
 ```
 
-```{bash, bash input for sourcetracker}
+```{bash, bash input for sourcetracker for NCAT}
 #set filepaths in environment
 echo "export SOURCETRACKER_PATH=$HOME/Documents/PigLungs/sourcetracker" >> ~/.bash_profile
 source ~/.bash_profile
@@ -1221,8 +1278,25 @@ source ~/.bash_profile
 #need to set up sourcetracker software add source/sink row to sample_data and one extra row beginning with a # on ASV table
 
 
-Rscript sourcetracker_for_qiime.r -i NCAT_lavage_sourcetracker_ASV_table.txt -m NCAT_lavage_sourcetracker_sample_data.txt -o lavage_full_NCAT -v -n 25
+Rscript sourcetracker_for_qiime.r -i WCF_lavage_sourcetracker_ASV_table.txt -m WCF_lavage_sourcetracker_sample_data.txt -o lavage_full_WCF -v -n 25
 ```
+
+```{r}
+ps.WCF = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
+
+write.dataset(ps.WCF, "~/PigLungs/sourcetracker/", "WCF_lavage_sourcetracker")
+
+ps.WCF_Swab = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
+
+write.dataset(ps.WCF_Swab, "~/PigLungs/sourcetracker/", "WCF_swab_sourcetracker")
+
+ps.WCF_Tissue = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
+
+write.dataset(ps.WCF_Tissue, "~/PigLungs/sourcetracker/", "WCF_tissue_sourcetracker")
+```
+
+
+##Make boxplots for this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ```{r, aggregation of sourcetracker txt files into dataframe}
 tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t")
