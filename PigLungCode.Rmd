@@ -452,9 +452,10 @@ plot_ordination(ps.prok.Ts, pig.ord, type="samples", color = "SampleSubtype", sh
 ```
 
 ```{r, make PCoA for all samples with unifrac and PERMANOVA}
-ps.rnc=subset_samples(ps.r, sample_data(ps.r)$Sample != "NTC")
-ps.rncp = prune_species(speciesSums(ps.rnc) > 0, ps.rnc)
-rm(ps.rnc)
+ps.r=readRDS("~/PigLungs/ps.r.RDS")
+ps.rncp=subset_samples(ps.r, sample_data(ps.r)$Sample != "NTC"& sample_data(ps.tree)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.tree)$SampleName != "NCAT_AIR_BLANK_S73") %>%
+  prune_species(speciesSums(.) > 0, .)
+rm(ps.rnc, ps.r)
 
 saveRDS(ps.rncp, "~/PigLungs/ps_ord.RDS")
 ps.rncp = readRDS("~/PigLungs/ps_ord.RDS")
@@ -479,7 +480,8 @@ pairwise.adonis(unifrac.dist, metadf$FarmSample) #pairwise testing with adonis s
 ```{r, create ordination for env and lungs samples and PERMANOVA}
 require(ggplot2)
 
-ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment") 
+ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
+  prune_species(speciesSums(.) > 0, .)
 
 ordinate(ps.Env, method = "PCoA", distance = "unifrac") %>%
   plot_ordination(ps.Env, ., type="samples", color = "SampleType", shape = "Farm") + stat_ellipse()
@@ -493,13 +495,15 @@ Envmeta = data.frame(sample_data(ps.Env))
 
 unifrac.dist = UniFrac(ps.Env)
 
-permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Envmeta) #permanova shows significant differences in farm*SampleType but pairwise testing with p value correction indicates that between the two farms none of the same samples are significantly different
+permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Envmeta) #permanova shows no significant differences (p=0.06) in farm*SampleType but there are significant differences in farm and sample type
 
 permanova
 
 Envmeta=unite(Envmeta, FarmSample, c(Farm, SampleType), remove = F)
 
-pairwise.adonis(unifrac.dist, Envmeta$FarmSample)
+library(pairwiseAdonis)
+
+pairwise.adonis(unifrac.dist, Envmeta$SampleType)
 
 Pigmeta = data.frame(sample_data(ps.Pig)) %>%
   unite(., FarmSample, c(Farm, SampleType), remove = F)
@@ -518,8 +522,9 @@ pairwise.adonis(unifrac.dist, Pigmeta$FarmSample) #Tissue samples are significan
 rm(ps.Pig, ps.Env)
 ```
 
-```{r}
-ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment") 
+```{r, anosim results for Pig and Env Data, redo ENV to remove blanks}
+ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
+  prune_species(speciesSums(.) > 0, .)
 
 ps.Pig = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Pig")
 
@@ -529,7 +534,7 @@ Envmeta = data.frame(sample_data(ps.Env)) %>%
 unifrac.dist = UniFrac(ps.Env)
 
 set.seed(100)
-anosim(unifrac.dist, Envmeta$SampleType, permutations = 9999) # R = 0.0732, significance = 0.056
+anosim(unifrac.dist, Envmeta$SampleType, permutations = 9999) # R = 0.079, significance = 0.06
 
 anosim(unifrac.dist, Envmeta$Farm, permutations = 9999) #R = 0.47, significance = 1e-4
 
@@ -546,9 +551,8 @@ unifrac.dist = UniFrac(ps.Pig)
 
 anosim(unifrac.dist, Pigmeta$Farm, permutations = 9999) #R = 0.51, significance = 1 e-4
 
-anosim(unifrac.dist, Pigmeta$SampleType, permutations = 9999) #R = 0.39, significance = 1e-4
+anosim(unifrac.dist, Pigmeta$SampleType, permutations = 9999) #R = 0.43, significance = 1e-4
 ```
-
 
 ```{r, look at alpha diversity values for the samples}
 #get Faith for NCAT
@@ -569,7 +573,7 @@ PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = 
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) 
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -582,7 +586,7 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)+expand_limits(y=0)
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +expand_limits(y=0)
 
 grid.arrange(g1, g2, nrow = 1)
 
@@ -612,6 +616,14 @@ summary(fit) #indicates there is no significant difference by Farm, SampleType, 
 ```
 
 ```{r, look at alpha diversity values for the environment samples across farms}
+library(phyloseq)
+library(ggplot2)
+library(dplyr) 
+library(picante)
+library(tidyr)
+library(stringr)
+library(gridExtra)
+
 ps.alpha=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
   prune_species(speciesSums(.) > 0, .)
 
@@ -639,7 +651,7 @@ PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = 
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5)+expand_limits(y=0)
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + expand_limits(y=0)
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -662,7 +674,7 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) + geom_jitter(width = 0.2, alpha = 0.5) + expand_limits(y=0)
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +  expand_limits(y=0)
 
 g=grid.arrange(g1, g2, nrow = 1)
 
@@ -689,20 +701,6 @@ summary(fit) #indicates there is a significant differnce by SampleType with diff
 TukeyHSD(fit)
 ```
 
-```{r, sample code from cell phone}
-glom.NCAT=tax_glom(ps.NCAT.f, taxrank = "Genus")
-
-require("vegan")
-
-vegandist.NCAT = vegdist(vegan_otu(ps.NCAT.f), "bray")
-betadis.NCAT=betadisper(vegandist.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "centroid")
-anova(betadis.NCAT)
-TukeyHSD(betadis.NCAT, group = sample_data(ps.NCAT.f)$SampleType, type = "median")
-plot(betadis.NCAT)
-
-#adonis(otu_table(ps.NCAT.f)~SampleType*CollectionTime, permutations = 999, data=cellCdr, parralell = 4))
-```
-
 ```{r}
 require(phyloseq)
 install.packages("rlang")
@@ -727,383 +725,14 @@ subset_samples(ps.rncp, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm
   plot_bar(., fill = "Phylum")
 ```
 
-```{r, Are there any ASVs shared by all samples? ASV comparison within NCAT}
-ps.prok.sam = subset_samples(ps.prok, sample_data(ps.prok)$Sample != "NTC" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleName != "NCAT_AIR_BLANK_S73")
+```{r, Lefse object for Pig swab and lavage samples}
+ps.pig=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample=="Pig") %>%
+  subset_samples(., sample_data(ps.rncp)$SampleType == "Lavage" | sample_data(ps.rncp)$SampleType == "Swab") %>%
+  prune_species(speciesSums(.) >0, .)
 
-ps.prok.samp = prune_species(speciesSums(ps.prok) >0, ps.prok)
-ps.r=transform_sample_counts(ps.prok,function(x) x/sum(x))
-ps.NCAT.r = subset_samples(ps.r, sample_data(ps.r)$Farm =="NCAT")
-ps.NCAT.f = prune_species(speciesSums(ps.NCAT.r)>0, ps.NCAT.r)
-ps.NCAT1 = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT")
-ps.NCAT2 = prune_species(speciesSums(ps.NCAT1) >0, ps.NCAT1)
-ps.NCAT = transform_sample_counts(ps.NCAT2, function(x) ifelse(x>0,1,0))
-rm(ps.NCAT1, ps.NCAT2)
+sample_names(ps.pig) #make sure we have the samples we want
 
-#ps.NCAT.glom=tax_glom(ps.NCAT, taxrank = "Genus")
-#ps.NCAT.glom2=transform_sample_counts(ps.NCAT.glom, function(x) ifelse(x>0,1,0))
-
-#ps.NCAT.all = filter_taxa(ps.NCAT.glom2, function(x) sum(x) >= (0.5*length(x)), TRUE)
-
-ps.NCAT.water = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Water" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.lavage = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Lavage" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.soil = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Soil" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.food = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Food" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.air = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Air" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.tissue = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Tissue" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-ps.NCAT.swab = subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$SampleType == "Swab" & sample_data(ps.NCAT.fr)$SampleSubtype != "Blank" & sample_data(ps.NCAT.fr)$SampleSubtype != "NTC")
-
-ps.NCAT.w = prune_species(speciesSums(ps.NCAT.water) >1e-3, ps.NCAT.water)
-ps.NCAT.l = prune_species(speciesSums(ps.NCAT.lavage) >1e-3, ps.NCAT.lavage)
-ps.NCAT.s = prune_species(speciesSums(ps.NCAT.soil) >1e-3, ps.NCAT.soil)
-ps.NCAT.f = prune_species(speciesSums(ps.NCAT.food) >1e-3, ps.NCAT.food)
-ps.NCAT.a = prune_species(speciesSums(ps.NCAT.air) >1e-3, ps.NCAT.air)
-ps.NCAT.t = prune_species(speciesSums(ps.NCAT.tissue)>1e-3, ps.NCAT.tissue)
-ps.NCAT.sw = prune_species(speciesSums(ps.NCAT.swab)>1e-3, ps.NCAT.swab)
-
-#ps.NCAT.w = filter_taxa(ps.NCAT.water, function(x) sum(x) >= (0.5*length(x)), TRUE)
-#ps.NCAT.l = filter_taxa(ps.NCAT.lavage, function(x) sum(x) >= (0.5*length(x)), TRUE)
-#ps.NCAT.s = filter_taxa(ps.NCAT.soil, function(x) sum(x) >= (0.5*length(x)), TRUE)
-#ps.NCAT.f = filter_taxa(ps.NCAT.food, function(x) sum(x) >= (0.5*length(x)), TRUE)
-#ps.NCAT.a = filter_taxa(ps.NCAT.air, function(x) sum(x) >= (0.5*length(x)), TRUE)
-
-A = as.list(colnames(otu_table(ps.NCAT.w)))
-
-B = as.list(colnames(otu_table(ps.NCAT.l)))
-
-C = as.list(colnames(otu_table(ps.NCAT.s)))
-
-D = as.list(colnames(otu_table(ps.NCAT.f)))
-
-E = as.list(colnames(otu_table(ps.NCAT.a)))
-
-F = as.list(colnames(otu_table(ps.NCAT.t)))
-
-xtab_set <- function(A,B){
-    both    <-  union(A,B)
-    inA     <-  both %in% A
-    inB     <-  both %in% B
-    return(table(inA,inB))
-}
-
-xtab_set(F,B)
-
-#Create a list of sequences that are within each sample group
-Water = intersect(A,B)
-Soil.Ctrl = intersect(C, B)
-Food = intersect(D, B)
-Air = intersect(E, B)
-Tissue = intersect(F,B)
-
-Air.Ctrl = intersect(setdiff(E,C), B)
-Food.Ctrl = intersect(setdiff(setdiff(D,C),Air.Ctrl), B)
-Water.Ctrl = intersect(setdiff(setdiff(setdiff(A,C),Air.Ctrl),Food.Ctrl),B)
-
-list = intersect(Air.Ctrl, Water.Ctrl)
-
-#use setdiff(x,y) for sequences in X not in Y
-
-#make a matrix of the subsetted phyloseq object, for determining abundances, need to rerun with ps.r above
-vegan_air=vegan_otu(ps.NCAT.tissue)
-
-#get a list of rows that contain the sequence of interest
-seqs = which(colnames(vegan_air) %in% Tissue)
-
-#subset the matrix to include only those rows we're interested in 
-vegan_air2=vegan_air[,seqs]
-
-#Example of how to obtain range numbers for consistency of lung microbiome
-min(rowSums(vegan_air2))
-rowSums(vegan_air2)
-AirCtrlAbun=rowSums(vegan_air2)
-samplenames=rownames(vegan_air2)
-
-Air = data.frame(AirAbun, row.names = samplenames)
-AbundanceData = do.call(rbind,Map(data.frame, Soils=SoilAbun, AirCtrl=AirCtrlAbun, Air=AirAbun, Water = WaterAbun, Food=FoodAbun))
-
-AbundanceData$Total = AbunData$Total
-rownames(AbundanceData) = samplenames
-AbundanceData$Total = rowSums(AbundanceData)
-row.names.remove <- c("NCAT_L_N1_S12", "NCAT_L_N2_S24")
-
-AbundanceData$Total = AbunData$Total
-
-AbundanceData=AbundanceData[!(row.names(AbundanceData) %in% row.names.remove), ]
-rm(AbundanceData)
-
-
-library("reshape2")
-
-abunddat=melt(AbundanceData)
-
-library("ggplot2")
-install.packages("ggthemes")
-library(ggthemes)
-install.packages("dplyr")
-library(dplyr)
-p=ggplot(abunddat, aes(x=variable, y=value))+geom_boxplot()+ylab("Relative Abundance")+xlab("Media")
-
-p
-
-rm(ps.NCAT.all)
-set.seed(17)
-NCATnet = make_network(ps.NCAT.f, distance = "jaccard", binary = TRUE, max.dist = 0.8)
-plot_network(NCATnet, ps.NCAT.f, color = "SampleType", label = NULL)
-
-```
-
-```{r, ASV comparison within WCF}
-ps.WCF.water = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Water")
-ps.WCF.lavage = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Lavage"& sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-ps.WCF.soil = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Soil"& sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-ps.WCF.food = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Food" & sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-ps.WCF.air = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Air" & sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-ps.WCF.swab = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Swab" & sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-ps.WCF.tissue = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Tissue" & sample_data(ps.WCF.fr)$SampleSubtype != "Blank" & sample_data(ps.WCF.fr)$SampleSubtype != "NTC")
-sample_names(ps.WCF.water)
-
-ps.WCF.w = prune_species(speciesSums(ps.WCF.water) > 0, ps.WCF.water)
-ps.WCF.l = prune_species(speciesSums(ps.WCF.lavage) > 0, ps.WCF.lavage)
-ps.WCF.s = prune_species(speciesSums(ps.WCF.soil) > 0, ps.WCF.soil)
-ps.WCF.f = prune_species(speciesSums(ps.WCF.food) > 0, ps.WCF.food)
-ps.WCF.a = prune_species(speciesSums(ps.WCF.air) > 0, ps.WCF.air)
-ps.WCF.sw = prune_species(speciesSums(ps.WCF.swab) > 0, ps.WCF.swab)
-ps.WCF.ts = prune_species(speciesSums(ps.WCF.tissue) > 0, ps.WCF.tissue)
-
-A = as.list(colnames(otu_table(ps.WCF.w)))
-
-B = as.list(colnames(otu_table(ps.WCF.l)))
-
-C = as.list(colnames(otu_table(ps.WCF.s)))
-
-D = as.list(colnames(otu_table(ps.WCF.f)))
-
-E = as.list(colnames(otu_table(ps.WCF.a)))
-
-#Create a list of sequences that are within each sample group
-Soil.Ctrl = intersect(C, B)
-Air = intersect(E, B)
-Air.Ctrl = intersect(setdiff(E,C), B)
-Food.Ctrl = intersect(setdiff(setdiff(D,C),Air.Ctrl), B)
-Water.Ctrl = intersect(setdiff(setdiff(setdiff(A,C),Air.Ctrl),Food.Ctrl),B)
-
-#make a matrix of the subsetted phyloseq object, for determining abundances, need to rerun with ps.r above
-vegan_air=vegan_otu(ps.WCF.lavage)
-
-#get a list of rows that contain the sequence of interest, change name to match media
-seqs = which(colnames(vegan_air) %in% Air)
-vegan_air2=vegan_air[,seqs]
-samplenames=rownames(vegan_air2)
-AirAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-names(AirAbun)="Air"
-
-seqs = which(colnames(vegan_air) %in% Soil.Ctrl)
-vegan_air2=vegan_air[,seqs]
-SoilCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl)
-vegan_air2=vegan_air[,seqs]
-AirCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Food.Ctrl)
-vegan_air2=vegan_air[,seqs]
-FoodCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Water.Ctrl)
-vegan_air2=vegan_air[,seqs]
-WaterCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-AbunWCFEnv = do.call(rbind,Map(data.frame, SoilCtrl=SoilCtrlAbun, AirCtrl=AirCtrlAbun, Water = WaterCtrlAbun, Food=FoodCtrlAbun))
-
-AbunWCFEnv$Total=rowSums(AbunWCFEnv)
-rownames(AbunWCFEnv)=samplenames
-AbunDataWCFEnv=cbind(AbunWCFEnv, AirAbun)
-
-boxplot(AbunDataWCFEnv)
-
-library("reshape2")
-
-abunddatWCF=melt(AbunDataWCF)
-
-library("ggplot2")
-install.packages("ggthemes")
-library(ggthemes)
-install.packages("dplyr")
-library(dplyr)
-p=ggplot(abunddatWCF, aes(x=variable, y=value))+geom_boxplot()+ylab("Relative Abundance")+xlab("Media")
-
-p
-```
-
-```{r, ASV comparison NCAT w WCF env media}
-#cross env media from WCF with NCAT
-
-A = as.list(colnames(otu_table(ps.WCF.w)))
-
-B = as.list(colnames(otu_table(ps.NCAT.l)))
-
-C = as.list(colnames(otu_table(ps.WCF.s)))
-
-D = as.list(colnames(otu_table(ps.WCF.f)))
-
-E = as.list(colnames(otu_table(ps.WCF.a)))
-
-#Create a list of sequences that are within each sample group
-Soil.Ctrl = intersect(C, B)
-Air = intersect(E, B)
-Air.Ctrl = intersect(setdiff(E,C), B)
-Food.Ctrl = intersect(setdiff(setdiff(D,C),Air.Ctrl), B)
-Water.Ctrl = intersect(setdiff(setdiff(setdiff(A,C),Air.Ctrl),Food.Ctrl),B)
-
-#make a matrix of the subsetted phyloseq object, for determining abundances, need to rerun with ps.r above
-vegan_air=vegan_otu(ps.NCAT.lavage)
-samplenames=rownames(vegan_air2)
-
-seqs = which(colnames(vegan_air) %in% Air)
-vegan_air2=vegan_air[,seqs]
-AirAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-names(AirAbun)="Air"
-
-seqs = which(colnames(vegan_air) %in% Soil.Ctrl)
-vegan_air2=vegan_air[,seqs]
-SoilCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl)
-vegan_air2=vegan_air[,seqs]
-AirCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Food.Ctrl)
-vegan_air2=vegan_air[,seqs]
-FoodCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Water.Ctrl)
-vegan_air2=vegan_air[,seqs]
-WaterCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-AbunWCFEnv.NCATL = do.call(rbind,Map(data.frame, SoilCtrl=SoilCtrlAbun, AirCtrl=AirCtrlAbun, Water = WaterCtrlAbun, Food=FoodCtrlAbun))
-
-AbunWCFEnv.NCATL$Total=rowSums(AbunWCFEnv.NCATL)
-rownames(AbunWCFEnv.NCATL)=samplenames
-AbunDataWCFEnvxNCATL=cbind(AbunWCFEnv.NCATL, AirAbun)
-```
-
-```{r, ASV comparison of intersecting NCAT and WCF media}
-#cross env media from WCF with NCAT
-
-A = as.list(colnames(otu_table(ps.NCAT.w)))
-
-B = as.list(colnames(otu_table(ps.NCAT.l)))
-
-C = as.list(colnames(otu_table(ps.NCAT.s)))
-
-D = as.list(colnames(otu_table(ps.NCAT.f)))
-
-E = as.list(colnames(otu_table(ps.NCAT.a)))
-
-#Create a list of sequences that are within each sample group
-Soil.Ctrl = intersect(C, B)
-Air = intersect(E, B)
-Air.Ctrl = intersect(setdiff(E,C), B)
-Food.Ctrl = intersect(setdiff(setdiff(D,C),Air.Ctrl), B)
-Water.Ctrl = intersect(setdiff(setdiff(setdiff(A,C),Air.Ctrl),Food.Ctrl),B)
-
-#make a matrix of the subsetted phyloseq object, for determining abundances, need to rerun with ps.r above
-vegan_air=vegan_otu(ps.NCAT.lavage)
-samplenames=rownames(vegan_air)
-
-seqs = which(colnames(vegan_air) %in% Air)
-vegan_air2=vegan_air[,seqs]
-AirAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-names(AirAbun)="Air"
-
-seqs = which(colnames(vegan_air) %in% Soil.Ctrl)
-vegan_air2=vegan_air[,seqs]
-SoilCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl)
-vegan_air2=vegan_air[,seqs]
-AirCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Food.Ctrl)
-vegan_air2=vegan_air[,seqs]
-FoodCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Water.Ctrl)
-vegan_air2=vegan_air[,seqs]
-WaterCtrlAbun = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-AbunNCATEnv = do.call(rbind,Map(data.frame, SoilCtrl=SoilCtrlAbun, AirCtrl=AirCtrlAbun, Water = WaterCtrlAbun, Food=FoodCtrlAbun))
-
-AbunNCATEnv$Total=rowSums(AbunNCATEnv)
-rownames(AbunNCATEnv)=samplenames
-AbunDataNCATEnv=cbind(AbunNCATEnv, AirAbun)
-
-boxplot(AbunDataNCATEnv)
-```
-
-```{r, local vs other air ASV comparison}
-A = as.list(colnames(otu_table(ps.NCAT.a)))
-
-B = as.list(colnames(otu_table(ps.NCAT.t)))
-
-C = as.list(colnames(otu_table(ps.NCAT.s)))
-
-#ps.WCF.tissue = subset_samples(ps.WCF.fr, sample_data(ps.WCF.fr)$SampleType == "Tissue")
-
-#ps.WCF.t = prune_species(speciesSums(ps.WCF.tissue)>0, ps.WCF.tissue)
-
-D = as.list(colnames(otu_table(ps.WCF.a)))
-
-E = as.list(colnames(otu_table(ps.WCF.t)))
-
-F = as.list(colnames(otu_table(ps.WCF.s)))
-
-#Create a list of sequences that are within each sample group
-Air.Ctrl.NCAT = intersect(setdiff(A,C), B)
-Air.Ctrl.NxW = intersect(setdiff(D,F), B)
-
-Air.Ctrl.WCF = intersect(setdiff(D,F),E)
-Air.Ctrl.WxN = intersect(setdiff(A,C),E)
-
-vegan_air=vegan_otu(ps.NCAT.lavage)
-samplenames=rownames(vegan_air)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl.NCAT)
-vegan_air2=vegan_air[,seqs]
-AirAbun.NCAT = data.frame(rowSums(vegan_air2), row.names = samplenames)
-names(AirAbun)="Air"
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl.NxW)
-vegan_air2=vegan_air[,seqs]
-AirAbun.NxW = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-vegan_air=vegan_otu(ps.WCF.lavage)
-samplenames=rownames(vegan_air)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl.WCF)
-vegan_air2=vegan_air[,seqs]
-AirAbun.WCF = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-seqs = which(colnames(vegan_air) %in% Air.Ctrl.WxN)
-vegan_air2=vegan_air[,seqs]
-AirAbun.WxN = data.frame(rowSums(vegan_air2), row.names = samplenames)
-
-AbunNCATEnv = do.call(rbind,Map(data.frame, Local=AirAbun.NCAT, NonLocal=AirAbun.NxW))
-
-AbunWCFEnv = do.call(rbind,Map(data.frame, Local=AirAbun.WCF, NonLocal=AirAbun.WxN))
-
-write.csv(AbunNCATEnv, "~/PigLungs/AbunNCATEnv.csv")
-write.csv(AbunWCFEnv, "~/PigLungs/AbunWCFEnv.csv")
-
-boxplot(AbunWCFEnv)
-```
-
-```{r, are there bacteria associated with any individual sample type within the pig lung NCAT}
-ps.NCAT.p=subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$Sample=="Pig")
-ps.NCAT.pig = prune_species(speciesSums(ps.NCAT.p) >0, ps.NCAT.p)
-rm(ps.NCAT.p)
-
-
-lefse.pig = as.data.frame(cbind(t(otu_table(ps.NCAT.pig, taxa_are_rows = FALSE)), tax_table(ps.NCAT.pig)))
+lefse.pig = as.data.frame(cbind(t(otu_table(ps.pig, taxa_are_rows = FALSE)), tax_table(ps.pig)))
 
 lefse.pig$Info=paste(lefse.pig$Kingdom, lefse.pig$Phylum, lefse.pig$Class, lefse.pig$Order, lefse.pig$Family,lefse.pig$Genus, sep = "|")
 lefse.pig$Kingdom = NULL
@@ -1113,94 +742,44 @@ lefse.pig$Order=NULL
 lefse.pig$Family=NULL
 lefse.pig$Genus=NULL
 
-NCATpigdata = as.data.frame(t(sample_data(ps.NCAT.pig)))
-NCATpigdata$Info=paste(row.names(NCATpigdata))
-NCATpigdata2=NCATpigdata[c("SampleType","SampleSubtype", "SampleName"),]
+LEFseMeta = as.data.frame(sample_data(ps.pig)) %>%
+  select(., c(SampleType,Farm,SampleName)) %>%
+  t(.) %>%
+  as.data.frame(.) %>%
+  mutate(., Info=row.names(.))
 
-lefse.out=merge(lefse.pig, NCATpigdata2, all=TRUE)
-rm(lefse.pig)
+lefse.out=merge(lefse.pig, LEFseMeta, all=TRUE)
+rm(lefse.pig, ps.pig)
 
-write.csv(lefse.out, "~/PigLungs/lefsepigNCAT.csv", quote = FALSE)
-
-ggplot(LEfsERes)
-
+write.csv(lefse.out, "~/PigLungs/lefsepig.csv", quote = FALSE)
 ```
 
-```{r, Lefse object for WCF Pig}
-ps.WCF.p=subset_samples(ps.WCF.r, sample_data(ps.WCF.r)$Sample=="Pig")
-ps.WCF.pig = prune_species(speciesSums(ps.WCF.p) >0, ps.WCF.p)
-rm(ps.WCF.p)
+```{r, LEFSE object for Environment}
+ps.Env=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
+  prune_species(speciesSums(.) > 0, .)
 
-lefse.pig = as.data.frame(cbind(t(otu_table(ps.WCF.pig, taxa_are_rows = FALSE)), tax_table(ps.WCF.pig)))
+sample_names(ps.Env) #make sure we have the samples we want
 
-lefse.pig$Info=paste(lefse.pig$Kingdom, lefse.pig$Phylum, lefse.pig$Class, lefse.pig$Order, lefse.pig$Family,lefse.pig$Genus, sep = "|")
-lefse.pig$Kingdom = NULL
-lefse.pig$Phylum=NULL
-lefse.pig$Class=NULL
-lefse.pig$Order=NULL
-lefse.pig$Family=NULL
-lefse.pig$Genus=NULL
+lefse.Env = as.data.frame(cbind(t(otu_table(ps.Env, taxa_are_rows = FALSE)), tax_table(ps.Env)))
 
-WCFpigdata = as.data.frame(t(sample_data(ps.WCF.pig)))
-WCFpigdata$Info=paste(row.names(WCFpigdata))
-WCFpigdata2=WCFpigdata[c("SampleType","SampleSubtype", "SampleName"),]
+lefse.Env$Info=paste(lefse.Env$Kingdom, lefse.Env$Phylum, lefse.Env$Class, lefse.Env$Order, lefse.Env$Family,lefse.Env$Genus, sep = "|")
+lefse.Env$Kingdom = NULL
+lefse.Env$Phylum=NULL
+lefse.Env$Class=NULL
+lefse.Env$Order=NULL
+lefse.Env$Family=NULL
+lefse.Env$Genus=NULL
 
-lefse.out=merge(lefse.pig, WCFpigdata2, all=TRUE)
-rm(lefse.pig)
+LEFseMeta = as.data.frame(sample_data(ps.Env)) %>%
+  select(., c(SampleType,Farm,SampleName)) %>%
+  t(.) %>%
+  as.data.frame(.) %>%
+  mutate(., Info=row.names(.))
 
-write.csv(lefse.out, "~/PigLungs/lefsepigWCF.csv", quote = FALSE)
-```
+lefse.out=merge(lefse.Env, LEFseMeta, all=TRUE)
+rm(lefse.Env, ps.Env)
 
-```{r, LEFSE object for soils}
-ps.soils=subset_samples(ps.r, sample_data(ps.r)$SampleType=="Soil")
-ps.soil.p = prune_species(speciesSums(ps.soils) >0, ps.soils)
-rm(ps.soils)
-
-
-lefse.soil = as.data.frame(cbind(t(otu_table(ps.soil.p, taxa_are_rows = FALSE)), tax_table(ps.soil.p)))
-
-lefse.soil$Info=paste(lefse.soil$Kingdom, lefse.soil$Phylum, lefse.soil$Class, lefse.soil$Order, lefse.soil$Family,lefse.soil$Genus, sep = "|")
-lefse.soil$Kingdom = NULL
-lefse.soil$Phylum=NULL
-lefse.soil$Class=NULL
-lefse.soil$Order=NULL
-lefse.soil$Family=NULL
-lefse.soil$Genus=NULL
-
-Soildata = as.data.frame(t(sample_data(ps.soil.p)))
-Soildata$Info=paste(row.names(Soildata))
-Soildata2=Soildata[c("Farm","SampleSubtype", "SampleName"),]
-
-lefse.out=merge(lefse.soil, Soildata2, all=TRUE)
-rm(lefse.soil)
-
-write.csv(lefse.out, "~/PigLungs/lefsesoil.csv", quote = FALSE)
-```
-
-```{r, LEFSE object for swabs}
-ps.swab=subset_samples(ps.r, sample_data(ps.r)$SampleType=="Swab")
-ps.swabs = prune_species(speciesSums(ps.swab) >0, ps.swab)
-rm(ps.swab)
-
-
-lefse.swab = as.data.frame(cbind(t(otu_table(ps.swabs, taxa_are_rows = FALSE)), tax_table(ps.swabs)))
-
-lefse.swab$Info=paste(lefse.swab$Kingdom, lefse.swab$Phylum, lefse.swab$Class, lefse.swab$Order, lefse.swab$Family,lefse.swab$Genus, sep = "|")
-lefse.swab$Kingdom = NULL
-lefse.swab$Phylum=NULL
-lefse.swab$Class=NULL
-lefse.swab$Order=NULL
-lefse.swab$Family=NULL
-lefse.swab$Genus=NULL
-
-Swabdata = as.data.frame(t(sample_data(ps.swabs)))
-Swabdata$Info=paste(row.names(Swabdata))
-Swabdata2=Swabdata[c("Farm","SampleSubtype", "SampleName"),]
-
-lefse.out=merge(lefse.swab, Swabdata2, all=TRUE)
-rm(lefse.swab)
-
-write.csv(lefse.out, "~/PigLungs/lefseswab.csv", quote = FALSE)
+write.csv(lefse.out, "~/PigLungs/lefseenv.csv", quote = FALSE)
 ```
 
 ```{r}
@@ -1277,10 +856,26 @@ write.dataset(ps.NCAT_Tissue, "~/PigLungs/sourcetracker", "NCAT_tissue_sourcetra
 
 ps.NCAT = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT")  
 
-ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "3") %>%
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "1") %>%
 prune_species(speciesSums(.) > 0, .)
 
 write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s1")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "2") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s2")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "3") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s3")
+
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "4") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s4")
 
 ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "5") %>%
 prune_species(speciesSums(.) > 0, .)
@@ -1306,6 +901,43 @@ ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" |
 prune_species(speciesSums(.) > 0, .)
 
 write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s9")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "10") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s10")
+
+##No lavage sample for 11 so excluded from analysis
+
+#ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "11") %>%
+#prune_species(speciesSums(.) > 0, .)
+
+#write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s11")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "12") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s12")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "13") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s13")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "14") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s14")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "15") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s15")
+
+ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "16") %>%
+prune_species(speciesSums(.) > 0, .)
+
+write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s16")
 ```
 
 ```{bash, bash input for sourcetracker for NCAT}
@@ -1334,9 +966,6 @@ write.dataset(ps.WCF_Tissue, "~/PigLungs/sourcetracker/", "WCF_tissue_sourcetrac
 
 
 ```
-
-
-##Make boxplots for this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ```{r, aggregation of sourcetracker txt files into dataframe for NCAT}
 tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>% 
@@ -1473,7 +1102,7 @@ ggplot(STDF_WCF, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fi
 
 ```
 
-```{r, what happens when we remove air samples from SourceTracker analysis?}
+```{r, what happens when we remove air samples from SourceTracker analysis?, not used}
 ps.WCF = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleType != "Air")
 
 sample_names(ps.WCF)
@@ -1482,7 +1111,29 @@ write.dataset(ps.WCF, "~/PigLungs/sourcetracker/", "WCF_lavage_noAir_sourcetrack
 ```
 
 
-```{r, aggregation of sourcetracker txt files into dataframe, not using this analysis}
+```{r, aggregation of sourcetracker txt files into dataframe, swab/lavage analysis}
+library(dplyr)
+library(tidyr)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample1_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S1 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S1$group = paste0("tissue_", S1$group)
+S1$SampleID = paste0("tissue_", S1$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample2_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S2 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S2$group = paste0("tissue_", S2$group)
+S2$SampleID = paste0("tissue_", S2$SampleID)
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample3_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
@@ -1491,12 +1142,18 @@ S3 = sample %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
 
+S3$group = paste0("tissue_", S3$group)
+S3$SampleID = paste0("tissue_", S3$SampleID)
+
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample4_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
 S4 = sample %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S4$group = paste0("tissue_", S4$group)
+S4$SampleID = paste0("tissue_", S4$SampleID)
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample5_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
@@ -1505,12 +1162,18 @@ S5 = sample %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
 
+S5$group = paste0("tissue_", S5$group)
+S5$SampleID = paste0("tissue_", S5$SampleID)
+
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample6_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
 S6 = sample %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID)))
+
+S6$group = paste0("tissue_", S6$group)
+S6$SampleID = paste0("tissue_", S6$SampleID)
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample7_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
@@ -1519,12 +1182,18 @@ S7 = sample %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
 
+S7$group = paste0("tissue_", S7$group)
+S7$SampleID = paste0("tissue_", S7$SampleID)
+
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample8_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
 S8 = sample %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S8$group = paste0("tissue_", S8$group)
+S8$SampleID = paste0("tissue_", S8$SampleID)
 
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample9_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
@@ -1533,9 +1202,72 @@ S9=sample %>%
   select(., -c(farm, sampletype, plateID)) %>%
   mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
 
-SLDF = bind_rows(S3, S4, S5, S6, S7, S8, S9) %>%
+S9$group = paste0("tissue_", S9$group)
+S9$SampleID = paste0("tissue_", S9$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample10_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S10 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S10$group = paste0("tissue_", S10$group)
+S10$SampleID = paste0("tissue_", S10$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample12_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S12 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S12$group = paste0("tissue_", S12$group)
+S12$SampleID = paste0("tissue_", S12$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample13_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S13 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S13$group = paste0("tissue_", S13$group)
+S13$SampleID = paste0("tissue_", S13$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample14_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S14 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S14$group = paste0("tissue_", S14$group)
+S14$SampleID = paste0("tissue_", S14$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample15_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S15 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S15$group = paste0("tissue_", S15$group)
+S15$SampleID = paste0("tissue_", S15$SampleID)
+
+sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample16_NCAT/sink_predictions.txt", header = T, sep = "\t")
+
+S16 = sample %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+S16$group = paste0("tissue_", S16$group)
+S16$SampleID = paste0("tissue_", S16$SampleID)
+
+SLDF = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
   group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
+  #summarise_each(., funs(mean)) %>%
   select(., -SampleID) %>%
   rename(Group = group) %>%
   reshape2::melt(.)
@@ -1553,4 +1285,22 @@ GradDF$Group=factor(GradDF$Group,levels=c("lavage","A_swab","B_swab","B_tissue",
 GradDF$variable=factor(GradDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
 p=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = GradDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+
+g=ggplot(SLDF, aes(variable, value)) + facet_grid(. ~ Group) + stat_boxplot(fill = NA) + ggtitle("SourceTracker") + labs(x = "Sample Type", y = "Relative Abundance")
+g
+
+SLDF2 = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
+  group_by(group) %>%
+  summarise_each(., funs(median)) %>%
+  select(., -SampleID) %>%
+  rename(Group = group) %>%
+  reshape2::melt(.)
+
+SLDF2$variable=factor(SLDF2$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
+
+ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF2, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+
+
 ```
+
+
