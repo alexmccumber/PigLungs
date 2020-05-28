@@ -9,31 +9,33 @@ biocLite(suppressUpdates = FALSE)
 biocLite("ShortRead", suppressUpdates = FALSE)
 
 biocLite("devtools")
-install.packages("Rcpp")
+#install.packages("Rcpp")
 library("devtools")
-devtools::install_github("benjjneb/dada2")
+#devtools::install_github("benjjneb/dada2")
 library("dada2")
 require("vegan")
-install.packages("dplyr")
+#install.packages("dplyr")
 library(dplyr)
 library(tidyr)
 library(phyloseq)
 library(ggplot2)
-install.packages("picante")
+#install.packages("picante")
 library(picante)
 library(stringr)
 library(grid)
-install.packages("gridExtra")
+#install.packages("gridExtra")
 library(gridExtra)
-install.packages("phangorn")
-install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+#install.packages("phangorn")
+#install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
 library(pairwiseAdonis)
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
 
-BiocManager::install("DECIPHER")
-BiocManager::install("dada2", version = "3.10")
+#iocManager::install("DECIPHER")
+#BiocManager::install("dada2", version = "3.10")
+
+##One note, in the metadata table, the sample ID for WCF_T_1B_S93 seems to indicate it should be a tissue sample; however, the incorrect ID was entered when submitting for sequencing. A review of the lab notebook correctly identifys the sample as a Swab sample is correct in the metadata table. 
 ```
 
 ##Plate 1 and DADA2 Pipeline
@@ -111,7 +113,7 @@ rownames(track) <- sample.names
 head(track)
 colSums(track)
 
-taxa = assignTaxonomy(seqtab.nochim, , multithread = FALSE)
+taxa = assignTaxonomy(seqtab.nochim, multithread = FALSE)
 taxa = addSpecies(taxa, )
 
 ```
@@ -243,13 +245,13 @@ pig.tree = read.tree(file = "~/PigLungs/pigs_placement.tog.relabelled.tre") %>%
   keep.tip(., sequences)
 ```
 
-
 ##Creation of Phyloseq Object and usage of Decontam for contaminating sequence removal
 
 ```{r, create phyloseq object}
 source('http://bioconductor.org/biocLite.R')
 biocLite('phyloseq')
 require(phyloseq)
+PigLungMetaData = read.csv("~/PigLungs/PigLungMetaData.csv")
 rownames(PigLungMetaData)=PigLungMetaData$SampleName
 SampleData=data.frame(PigLungMetaData)
 
@@ -343,125 +345,32 @@ head(which(contamdf.freq$contaminant))
 plot_frequency(ps, taxa_names(ps)[c(55,2)], conc = "Qbit2") + xlab("DNA Concentration")
 ```
 
-```{r}
-ps=readRDS("~/PigLungs/ps.RDS")
-#remove all ASVs that aren't bacteria
-ps.prok=subset_taxa(ps.1, Kingdom == "Bacteria")
-saveRDS(ps.prok, "~/PigLungs/ps.prok.RDS")
-
-ps.prok=readRDS("~/PigLungs/ps.prok.RDS")
-```
-
-
-##Creation of tree
-
-```{r, make list of sequences in fasta file for tree making}
-library(dada2)
-require(phangorn)
-require(DECIPHER)
-
-vegan_otu <- function(physeq) {
-    OTU <- otu_table(physeq)
-    if (taxa_are_rows(OTU)) {
-        OTU <- t(OTU)
-    }
-    return(as(OTU, "matrix"))
-}
-
-uniques=getUniques(vegan_otu(ps.prok))
-sequences=names(uniques)
-uniquesToFasta(uniques,fout = "~/pigs.fasta", ids=sequences)
-```
-
-```{bash, make a tree with SEPP using gg backbone tree}
-wget  "https://raw.github.com/smirarab/sepp-refs/master/gg/sepp-package.tar.bz"
-
-tar xvfj sepp-package.tar.bz
-
-cd sepp-package/sepp
-python setup.py config -c
-
-./sepp-package/run-sepp.sh pigs.fasta pigs
-```
-
-```{r, view tree file with ggtree}
-if (!requireNamespace("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-
-BiocManager::install("ggtree")
-
-library(ape)
-pig.tree = read.tree(file = "~/PigLungs/pigs_placement.tog.relabelled.tre") %>%
-  keep.tip(., sequences)
-```
-
-```{r, merge tree with phyloseq object}
-ps.tree = merge_phyloseq(ps.prok, pig.tree)
-```
-
 ##Data Analysis
 
-```{r, read in phyloseq object and subset samples}
-#Check rarefaction and number of counts for each sample
-otu.Prok=vegan_otu(ps.prok)
+```{r, make PCoA for all samples with unifrac and PERMANOVA}
+#library(dplyr)
+#library(ggplot2)
+require(tidyr)
+#ps.tree=readRDS("~/PigLungs/pstree.RDS")
 
-SampleDF = as.data.frame(sample_data(ps.prok))
-SampleDF$LibrarySize
-SampleSums=as.data.frame(sample_sums(ps.prok))
-colnames(SampleSums)="SampleSums"
-SampleDF.merged=merge(SampleDF, SampleSums, by = 0)
-SampleDF.merged$Row.names=NULL
-rm(SampleDF, SampleSums)
-
-SampleDF.merged = SampleDF.merged[order(SampleDF.merged$SampleSums),]
-
+#transform sample counts to relative abundance
 ps.r=transform_sample_counts(ps.tree,function(x) x/sum(x))
 
-ps.WCF = subset_samples(ps.r, sample_data(ps.r)$Farm == "WCF")
-ps.WCF.r = prune_species(speciesSums(ps.WCF)>0, ps.WCF)
+#remove blank and NTC samples
+ps.rncp=subset_samples(ps.r, sample_data(ps.r)$Sample != "NTC" & sample_data(ps.r)$SampleName != "FOF_AIR_BLANK_S92" & sample_data(ps.r)$SampleName != "NCAT_AIR_BLANK_S73") %>%
+  prune_species(speciesSums(.) > 0, .) %>%
+  subset_taxa(., Kingdom == "Bacteria")
+rm(ps.r)
 
-rm(ps,ps.prok)
-saveRDS(ps.r, "~/PigLungs/ps.r.RDS")
-ps.fr=filter_taxa(ps.r, function(x) mean(x) >1e-5, TRUE)
+#check names to make sure they're removed
+sample_names(ps.rncp)
 
-#look at NTC sample Genus: Corynebacterium_1 and Glutamicibacter
-NTC=subset_samples(ps.prok, sample_names(ps.prok) == "NCAT_L_N2_S24")
-NTC.seq=prune_species(speciesSums(NTC)>0, NTC)
-rm(NTC)
-
-tax_table(NTC.seq)
-```
-
-```{r, rarefy tissue samples}
-ps.prok.T=subset_samples(ps.prok, sample_data(ps.prok)$SampleType == "Tissue")
-ps.prok.Ts=prune_species(speciesSums(ps.prok.T)>0, ps.prok.T)
-rm(ps.prok.T)
-
-ps.prok.Ts
-ps.rare=prune_samples(sample_sums(ps.prok.Ts)<=200, ps.prok.Ts) 
-vegan.T=vegan_otu(ps.rare)
-rarecurve(vegan.T)
-
-ps.T6A=subset_samples(ps.rare, sample_names(ps.rare) == "NCAT_T_6A_S55")
-T6A.seq=prune_species(speciesSums(ps.T6A)>0, ps.T6A)
-tax_table(T6A.seq)
-
-set.seed(100)
-pig.ord=ordinate(ps.prok.Ts, method = "NMDS", distance = "bray")
-plot_ordination(ps.prok.Ts, pig.ord, type="samples", color = "SampleSubtype", shape = "PigGender")
-```
-
-```{r, make PCoA for all samples with unifrac and PERMANOVA}
-ps.r=readRDS("~/PigLungs/ps.r.RDS")
-ps.rncp=subset_samples(ps.r, sample_data(ps.r)$Sample != "NTC"& sample_data(ps.tree)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.tree)$SampleName != "NCAT_AIR_BLANK_S73") %>%
-  prune_species(speciesSums(.) > 0, .)
-rm(ps.rnc, ps.r)
-
+#save ps object just in case
 saveRDS(ps.rncp, "~/PigLungs/ps_ord.RDS")
 ps.rncp = readRDS("~/PigLungs/ps_ord.RDS")
 
 p=ordinate(ps.rncp, method = "PCoA", distance = "unifrac") %>%
-plot_ordination(ps.rncp, ., type="samples", color = "Sample", shape = "Farm")+stat_ellipse()
+plot_ordination(ps.rncp, ., type="samples", color = "Sample", shape = "Farm")+stat_ellipse()+theme_classic() 
 
 p
 
@@ -495,7 +404,7 @@ Envmeta = data.frame(sample_data(ps.Env))
 
 unifrac.dist = UniFrac(ps.Env)
 
-permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Envmeta) #permanova shows no significant differences (p=0.06) in farm*SampleType but there are significant differences in farm and sample type
+permanova = adonis(unifrac.dist ~ Farm*SampleType, data = Envmeta) #permanova shows no significant differences (p=0.064) in farm*SampleType but there are significant differences in farm and sample type
 
 permanova
 
@@ -534,9 +443,9 @@ Envmeta = data.frame(sample_data(ps.Env)) %>%
 unifrac.dist = UniFrac(ps.Env)
 
 set.seed(100)
-anosim(unifrac.dist, Envmeta$SampleType, permutations = 9999) # R = 0.079, significance = 0.06
+anosim(unifrac.dist, Envmeta$SampleType, permutations = 9999) # R = 0.08, significance = 0.066
 
-anosim(unifrac.dist, Envmeta$Farm, permutations = 9999) #R = 0.47, significance = 1e-4
+anosim(unifrac.dist, Envmeta$Farm, permutations = 9999) #R = 0.44, significance = 1e-4
 
 EnvNMDS=metaMDS(unifrac.dist, k=3)
 
@@ -549,9 +458,9 @@ Pigmeta = data.frame(sample_data(ps.Pig)) %>%
 
 unifrac.dist = UniFrac(ps.Pig)
 
-anosim(unifrac.dist, Pigmeta$Farm, permutations = 9999) #R = 0.51, significance = 1 e-4
+anosim(unifrac.dist, Pigmeta$Farm, permutations = 9999) #R = 0.52, significance = 1 e-4
 
-anosim(unifrac.dist, Pigmeta$SampleType, permutations = 9999) #R = 0.43, significance = 1e-4
+anosim(unifrac.dist, Pigmeta$SampleType, permutations = 9999) #R = 0.40, significance = 1e-4
 ```
 
 ```{r, look at alpha diversity values for the samples}
@@ -573,7 +482,7 @@ PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = 
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) 
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + stat_c + theme_classic()
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -586,15 +495,15 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +expand_limits(y=0)
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +expand_limits(y=0) + theme_classic()
 
 grid.arrange(g1, g2, nrow = 1)
 
 g=arrangeGrob(g1,g2,nrow=1)
 
-ggsave(file="~/PigLungs/LungalphaDiv.png", g, width = 20, height = 10, units = "cm")
+ggsave(file="~/PigLungs/PublicationFigures/LungalphaDiv.PDF", g, width = 20, height = 20, units = "cm")
 
-#comparison of alpha diversities at each farm for the pig smaples
+#comparison of alpha diversities at each farm for the pig samples
 fit = aov(PD ~ Farm*SampleType, data =  PD)
 plot(fit)
 
@@ -603,26 +512,29 @@ shapiro.test(PD$PD) #p<0.05 so data is not normally distrubted and ANOVA would b
 PD=unite(PD, FarmSample, c(Farm, SampleType), remove = F) #want to do farm by sample so making new column for kruskal test
 
 kruskal.test(PD ~ FarmSample, data = PD)
-pairwise.wilcox.test(PD$PD, PD$FarmSample, p.adjust.method = "BH") #only swab samples between farms are different
+pairwise.wilcox.test(PD$PD, PD$FarmSample, p.adjust.method = "BH") #only lavage (p = 0.033) and swab (p = 3.9e-5) samples between farms are different
+
+#don't hate but I'm adding significance bars later in adobe acrobat 
 
 kruskal.test(PD ~ SampleType, data = PD)
-pairwise.wilcox.test(PD$PD, PD$SampleType, p.adjust.method = "BH") #indicates Tissue samples are different from lavage and swab but lavage and swab are not different
+pairwise.wilcox.test(PD$PD, PD$SampleType, p.adjust.method = "BH") #indicates Tissue samples are different from lavage and swab (p < 0.05) but lavage and swab are not different
 
 fit = aov(Shannon ~ Farm*SampleType, data = Shannon)
 plot(fit)
-shapiro.test(Shannon$Shannon) # p=0.24 so data is normally distributed
+shapiro.test(Shannon$Shannon) # p=0.22 so data is normally distributed
 
 summary(fit) #indicates there is no significant difference by Farm, SampleType, or Farm*SampleType
 ```
 
 ```{r, look at alpha diversity values for the environment samples across farms}
-library(phyloseq)
-library(ggplot2)
-library(dplyr) 
-library(picante)
-library(tidyr)
-library(stringr)
-library(gridExtra)
+#library(phyloseq)
+#library(ggplot2)
+#library(dplyr) 
+#library(picante)
+#library(tidyr)
+#library(stringr)
+#library(gridExtra)
+
 
 ps.alpha=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
   prune_species(speciesSums(.) > 0, .)
@@ -634,7 +546,7 @@ pd.result = pd(sample, tree)
 
 pd.result$Samples = rownames(pd.result)
 
-PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
+PD = tidyr::separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = "_") %>% 
   mutate(SampleType = str_replace(SampleType, "W", "Water")) %>% 
   mutate(SampleType = str_replace(SampleType, "FWater", "Water")) %>%
   mutate(SampleType = str_replace(SampleType, "MWater", "Water")) %>% 
@@ -651,7 +563,7 @@ PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = 
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + expand_limits(y=0)
+g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + expand_limits(y=0) + theme_classic()
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -674,11 +586,11 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +  expand_limits(y=0)
+g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +  expand_limits(y=0) + theme_classic()
 
 g=grid.arrange(g1, g2, nrow = 1)
 
-ggsave(file="~/PigLungs/EnvalphaDiv.png", g, width = 20, height = 10, units = "cm")
+ggsave(file="~/PigLungs/PublicationFigures/EnvalphaDiv.PDF", g, width = 20, height = 20, units = "cm")
 
 fit = aov(PD ~ Farm*SampleType, data =  PD)
 plot(fit)
@@ -687,11 +599,11 @@ plot(fit)
 shapiro.test(PD$PD) #p<0.05 so data is not normally distrubted and ANOVA would be incorrectly applied
 PD=unite(PD, FarmSample, c(Farm, SampleType), remove = F) #want to do farm by sample so making new column for kruskal test
 
-kruskal.test(PD ~ FarmSample, data = PD) #p=0.24 so none of the medians are different between the Farm*SampleType
+kruskal.test(PD ~ FarmSample, data = PD) #p=0.26 so none of the medians are different between the Farm*SampleType
 
-kruskal.test(PD ~ SampleType, data = PD) #p=0.177 so none of the medians are different between SampleTypes
+kruskal.test(PD ~ SampleType, data = PD) #p=0.16 so none of the medians are different between SampleTypes
 
-pairwise.wilcox.test(PD$PD, PD$Farm, p.adjust.method = "BH") #p=0.075 so shows there is no difference between farms 
+pairwise.wilcox.test(PD$PD, PD$Farm, p.adjust.method = "BH") #p=0.079 so shows there is no difference between farms 
 
 fit = aov(Shannon ~ Farm*SampleType, data = Shannon)
 plot(fit)
@@ -701,17 +613,7 @@ summary(fit) #indicates there is a significant differnce by SampleType with diff
 TukeyHSD(fit)
 ```
 
-```{r}
-require(phyloseq)
-install.packages("rlang")
-ps=readRDS("~/PigLungs/ps.RDS")
-UpperLower$Genus=factor(UpperLower$Genus,levels=c("Delftia", "Yersinia", "Megasphaera", "Aerococcus", "Dictyoglomus", "Tepidiphilus", "Caldicellulosiruptor", "Escherichia_Shigella", "Streptococcus", "Anoxybacillus", "Psychrobacter", "Lachnospiraceae_XPB1014_group", "Lactobacillus", "Atopostipes", "Lachnospiraceae_AC2044_group", "Collinsella", "Fervidobacterium", "IheB3_7", "Bergeyella", "Peptoclostridium", "Oscillospira", "Ignavigranum", "dgA_11_gut_group"))
-require(ggplot2)
-p=ggplot(UpperLower, aes(x=Genus,y=LDAScore))+geom_col(aes(fill=Location))+coord_flip()
-```
-
-```{r, creation of NCAT pig relative abundance chart}
-set.seed(100)
+```{r, creation of NCAT pig relative abundance chart, Plots were not used for publication, only posters}
 subset_samples(ps.rncp, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm == "NCAT") %>%
   prune_species(speciesSums(.) >0, .) %>%
   tax_glom(., taxrank = "Phylum") %>%
@@ -752,56 +654,19 @@ lefse.out=merge(lefse.pig, LEFseMeta, all=TRUE)
 rm(lefse.pig, ps.pig)
 
 write.csv(lefse.out, "~/PigLungs/lefsepig.csv", quote = FALSE)
-```
 
-```{r, LEFSE object for Environment}
-ps.Env=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
-  prune_species(speciesSums(.) > 0, .)
+#once I ran Lefse through galaxy, I removed all of the genera that weren't significant and imported the resulting excel tab
 
-sample_names(ps.Env) #make sure we have the samples we want
+UpperLower = read.csv("~/PigLungs/LEfsEResultsUpperLower.csv") %>%
+  mutate(., Genus = ï..Genus)
 
-lefse.Env = as.data.frame(cbind(t(otu_table(ps.Env, taxa_are_rows = FALSE)), tax_table(ps.Env)))
+UpperLower$Genus=factor(UpperLower$Genus,levels=c("Delftia", "Yersinia", "Megasphaera", "Aerococcus", "Dictyoglomus", "Tepidiphilus", "Caldicellulosiruptor", "Escherichia_Shigella", "Streptococcus", "Anoxybacillus", "Psychrobacter", "Lachnospiraceae_XPB1014_group", "Lactobacillus", "Atopostipes", "Lachnospiraceae_AC2044_group", "Collinsella", "Fervidobacterium", "IheB3_7", "Bergeyella", "Peptoclostridium", "Oscillospira", "Ignavigranum", "dgA_11_gut_group"))
 
-lefse.Env$Info=paste(lefse.Env$Kingdom, lefse.Env$Phylum, lefse.Env$Class, lefse.Env$Order, lefse.Env$Family,lefse.Env$Genus, sep = "|")
-lefse.Env$Kingdom = NULL
-lefse.Env$Phylum=NULL
-lefse.Env$Class=NULL
-lefse.Env$Order=NULL
-lefse.Env$Family=NULL
-lefse.Env$Genus=NULL
+require(ggplot2)
 
-LEFseMeta = as.data.frame(sample_data(ps.Env)) %>%
-  select(., c(SampleType,Farm,SampleName)) %>%
-  t(.) %>%
-  as.data.frame(.) %>%
-  mutate(., Info=row.names(.))
+p=ggplot(UpperLower, aes(x=Genus,y=LDAScore))+geom_col(aes(fill=Location))+coord_flip()+theme_classic()
 
-lefse.out=merge(lefse.Env, LEFseMeta, all=TRUE)
-rm(lefse.Env, ps.Env)
-
-write.csv(lefse.out, "~/PigLungs/lefseenv.csv", quote = FALSE)
-```
-
-```{r}
-Uppsamp.ps=subset_samples(ps.NCAT.fr, sample_data(ps.NCAT.fr)$Sample == "Pig" & sample_data(ps.NCAT.fr) != "NTC")
-sample_names(Uppsamp.ps)
-
-ps.Genus=subset_taxa(Uppsamp.ps, Genus=="Delftia") 
-vegan.Genus=as.data.frame(vegan_otu(ps.Genus)) 
-Genussums=as.data.frame(rowSums(vegan.Genus))
-mean(Genussums$`rowSums(vegan.Genus)`)
-
-Genusdf=cbind(Genussums,fishdr,deparse.level=1)
-GenusTFS=aggregate(Genussums~TimeFedStarved,Genusdf,median)
-ChitinibacterTFS=GenusTFS
-colnames(ChitinibacterTFS) = c("TimeFedStarved","Chitinibacter")
-
-#Anoxybacillus= 0.008, Atopostipes = 0.005, Bergeyella=0.001,Collinsella=0.001,Fervidobacterium=0.003
-
-UpperLower$Genus=factor(c("Delftia", "Yersinia", "Megasphaera", "Aerococcus", "Dictyoglomus", "Tepidphilus", "Caldicellulosiruptor", "Escherichia_Shigella", "Streptococcus", "Anoxybacillus", "Psychrobacter", "Lachnospiracaea_XPB1014_group", "Lactobacillus", "Atopostipes", "Lachnospiraceae_AC2044_group", "Collinsella", "Fervidobacterium", "IheB3_7", "Bergeyella", "Peptoclostridium", "Oscillospira", "Ignavigranum", "dgA_11_gut_group"))
-
-ggplot(UpperLower, aes(x=Genus,y=LDAScore))+geom_col(aes(fill=Location))+coord_flip()
-
+p
 ```
 
 ```{r}
@@ -815,33 +680,8 @@ p=ggplot(TissueAbun, aes(x=Location, y=Abundance))+geom_boxplot()+facet_grid(~Fa
 p
 ```
 
-
-```{r, attempt to create an input object for picrust2}
-library(biomformat)
-ps.prok = readRDS("~/PigLungs/ps.prok.RDS") #has 18,457 ASVs
-
-#filter to retain samples seen at least 20 times across all samples
-ps.prok.100 = prune_species(speciesSums(ps.prok) >100, ps.prok) #4,078 ASVs
-
-#need to make a biom file
-#biomformat package should be loaded with phyloseq package
-
-piggy_biom=biomformat::make_biom(as(otu_table(ps.prok.100, taxa_are_rows = T),"matrix"))
-biomformat::write_biom(piggy_biom, "~/PigLungs/piggy.biom")
-
-write.dataset.biom(ps.prok.100, "~/PigLungs/", "piggy_100")
-
-write.dataset(ps.prok.100, "~/PigLungs/", "piggy_try")
-
-
-#need to make a fasta file
-prok.100=vegan_otu(ps.prok.100)
-piggy_fasta=dada2::uniquesToFasta(prok.100, fout = "~/PigLungs/piggy.fasta", ids=colnames(otu_table(ps.prok.100)))
-head(piggy_fasta)
-```
-
 ```{r, attempt at SourceTracker for NCAT, not using this analysis}
-#run
+#remove all samples that aren't NCAT or what we care about
 ps.NCAT = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleSubtype != "NTC" & sample_data(ps.prok)$SampleSubtype != "Blank")
 
 write.dataset(ps.NCAT, "~/PigLungs/sourcetracker", "NCAT_lavage_sourcetracker")
@@ -870,7 +710,6 @@ ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" |
 prune_species(speciesSums(.) > 0, .)
 
 write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s3")
-
 
 ps.NCAT_s1=subset_samples(ps.NCAT,sample_data(ps.NCAT)$Sample == "Environment" | sample_data(ps.NCAT)$PigID == "4") %>%
 prune_species(speciesSums(.) > 0, .)
@@ -1022,7 +861,7 @@ STDF_avg$variable=factor(STDF_avg$variable,levels=c("Food","Water", "Soil", "Unk
 
 STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
 
-g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
 
 STDF_NCAT = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
   reshape2::melt(.)
@@ -1031,87 +870,12 @@ STDF_NCAT$variable=factor(STDF_NCAT$variable,levels=c("Food","Water", "Soil", "U
 
 STDF_NCAT$Group=factor(STDF_NCAT$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
 
-g=ggplot(STDF_NCAT, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fill = NA) #+ geom_jitter(width = 0.2, alpha = 0.5, aes(color = Group))+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+g=ggplot(STDF_NCAT, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fill = NA) + theme_classic()#+ geom_jitter(width = 0.2, alpha = 0.5, aes(color = Group))+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+
+g
 ```
 
-```{r, WCF sourcetracker info}
-tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>% 
-  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
-  select(., -c(farm, sampletype, plateID)) %>%
-  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID)))
-
-tissue_ST_all = tissue_ST %>%
-  mutate(., sampletype = "tissue") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
-  
-tissue_ST_avg = tissue_ST %>%
-  group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
-  mutate(., sampletype = "tissue") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
-  
-lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>%
-  mutate(.,Group = "lavage")
-
-lavage_ST_all = lavage_ST %>%
-  select(., -SampleID)
-
-lavage_ST_avg=lavage_ST %>% 
-  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
-  summarise_each(., funs(mean)) %>%
-  mutate(., Group = "lavage") %>%
-  select(., -c(farm, plateID, SampleID, sampletype))
-
-swab_ST=read.table("~/PigLungs/sourcetracker/swab_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>% 
-  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
-  select(., -c(farm, sampletype, plateID)) %>%
-  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
-
-swab_ST_all = swab_ST %>%
-  mutate(., sampletype = "swab") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
-
-swab_ST_avg = swab_ST %>%
-  group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
-  mutate(., sampletype = "swab") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
-
-STDF_avg = bind_rows(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) %>%
-  #mutate(., Swab.Lavage = 0) %>%
-  reshape2::melt(.)
-
-STDF_avg$variable=factor(STDF_avg$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
-
-STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
-
-g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
-
-STDF_WCF = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
-  reshape2::melt(.)
-
-STDF_WCF$variable=factor(STDF_WCF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
-
-STDF_WCF$Group=factor(STDF_WCF$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
-
-ggplot(STDF_WCF, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fill = NA) #+ geom_jitter(width = 0.2, alpha = 0.5)+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
-
-```
-
-```{r, what happens when we remove air samples from SourceTracker analysis?, not used}
-ps.WCF = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleType != "Air")
-
-sample_names(ps.WCF)
-
-write.dataset(ps.WCF, "~/PigLungs/sourcetracker/", "WCF_lavage_noAir_sourcetracker")
-```
-
-
-```{r, aggregation of sourcetracker txt files into dataframe, swab/lavage analysis}
+```{r, aggregation of sourcetracker txt files into dataframe, swab/lavage analysis, I really should have written a function here and used purrr}
 library(dplyr)
 library(tidyr)
 
@@ -1267,7 +1031,7 @@ S16$SampleID = paste0("tissue_", S16$SampleID)
 
 SLDF = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
   group_by(group) %>%
-  #summarise_each(., funs(mean)) %>%
+  summarise_each(., funs(mean)) %>%
   select(., -SampleID) %>%
   rename(Group = group) %>%
   reshape2::melt(.)
@@ -1276,7 +1040,9 @@ SLDF$Group = paste0("tissue_", SLDF$Group)
 
 SLDF$variable=factor(SLDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
-ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+g = ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+
+ggsave(file="~/PigLungs/PublicationFigures/STforSLAvg.PDF", g, width = 10, height = 10, units = "cm")
 
 GradDF = bind_rows(SLDF, STDF)
 
@@ -1286,7 +1052,7 @@ GradDF$variable=factor(GradDF$variable,levels=c("Food","Water", "Soil", "Unknown
 
 p=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = GradDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
 
-g=ggplot(SLDF, aes(variable, value)) + facet_grid(. ~ Group) + stat_boxplot(fill = NA) + ggtitle("SourceTracker") + labs(x = "Sample Type", y = "Relative Abundance")
+g=ggplot(SLDF, aes(variable, value)) + facet_grid(. ~ Group) + stat_boxplot(fill = NA) + ggtitle("SourceTracker") + labs(x = "Sample Type", y = "Relative Abundance")+theme_classic()
 g
 
 SLDF2 = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
@@ -1299,8 +1065,6 @@ SLDF2 = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S
 SLDF2$variable=factor(SLDF2$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
 ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF2, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
-
-
 ```
 
 
