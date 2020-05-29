@@ -28,6 +28,8 @@ library(gridExtra)
 #install.packages("phangorn")
 #install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
 library(pairwiseAdonis)
+install.packages("RColorBrewer")
+library(RColorBrewer)
 
 #if (!requireNamespace("BiocManager", quietly = TRUE))
 #    install.packages("BiocManager")
@@ -480,7 +482,9 @@ PD = separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA), sep = 
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + stat_c + theme_classic()
+g1 = ggplot(PD, aes(SampleType, PD, fill = Farm)) + geom_boxplot() +
+  theme_minimal()+scale_fill_manual(values = c("#BF812D","darkslategray4"))+
+  xlab(element_blank())
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -493,13 +497,16 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +expand_limits(y=0) + theme_classic()
+g2=ggplot(Shannon, aes(SampleType, Shannon, fill = Farm)) + 
+  geom_boxplot() +expand_limits(y=0)  + 
+  theme_minimal()+scale_fill_manual(values = c("#BF812D","darkslategray4"))+
+  xlab(element_blank())
 
 grid.arrange(g1, g2, nrow = 1)
 
 g=arrangeGrob(g1,g2,nrow=1)
 
-ggsave(file="~/PigLungs/PublicationFigures/LungalphaDiv.PDF", g, width = 20, height = 20, units = "cm")
+ggsave(file="~/PigLungs/PublicationFigures/LungalphaDiv.PDF", g, width = 12, height = 6, units = "in")
 
 #comparison of alpha diversities at each farm for the pig samples
 fit = aov(PD ~ Farm*SampleType, data =  PD)
@@ -561,7 +568,9 @@ PD = tidyr::separate(pd.result, Samples, into = c("Farm", "SampleType", NA, NA),
 
 rm(sample, tree, pd.result)
 
-g1=ggplot(PD, aes(SampleType, PD, color = Farm)) + stat_boxplot(fill = NA) + expand_limits(y=0) + theme_classic()
+g1=ggplot(PD, aes(SampleType, PD, fill = Farm)) + geom_boxplot() + expand_limits(y=0) +
+  theme_minimal()+scale_fill_manual(values = c("#BF812D","darkslategray4"))+
+  xlab(element_blank())
 
 Shannon.result = estimate_richness(ps.alpha, measures = "Shannon")
 
@@ -584,11 +593,13 @@ Shannon = separate(Shannon.result, Samples, into = c("Farm", "SampleType", NA, N
 
 rm(Shannon.result)
 
-g2=ggplot(Shannon, aes(SampleType, Shannon, color = Farm)) + stat_boxplot(fill = NA) +  expand_limits(y=0) + theme_classic()
+g2=ggplot(Shannon, aes(SampleType, Shannon, fill = Farm)) + geom_boxplot() + expand_limits(y=0) +
+  theme_minimal()+scale_fill_manual(values = c("#BF812D","darkslategray4"))+
+  xlab(element_blank())
 
 g=grid.arrange(g1, g2, nrow = 1)
 
-ggsave(file="~/PigLungs/PublicationFigures/EnvalphaDiv.PDF", g, width = 20, height = 20, units = "cm")
+ggsave(file="~/PigLungs/PublicationFigures/EnvalphaDiv.PDF", g, width = 12, height = 6, units = "in")
 
 fit = aov(PD ~ Farm*SampleType, data =  PD)
 plot(fit)
@@ -1043,7 +1054,7 @@ STDF_avg$variable=factor(STDF_avg$variable,levels=c("Food","Water", "Soil", "Unk
 
 STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","swab_A", "swab_B", "tissue_B", "tissue_A"))
 
-ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
+g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
 
 ggsave(file="~/PigLungs/PublicationFigures/STAvgFOF.PDF", g, width = 10, height = 10, units = "cm")
 
@@ -1054,7 +1065,7 @@ STDF_FOF$variable=factor(STDF_FOF$variable,levels=c("Food","Water", "Soil", "Unk
 
 STDF_FOF$Group=factor(STDF_FOF$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
 
-ggplot(STDF_FOF, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
+g=ggplot(STDF_FOF, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
 
 ggsave(file="~/PigLungs/PublicationFigures/STFOF.PDF", g, width = 20, height = 10, units = "cm")
 ```
@@ -1214,7 +1225,12 @@ SLDF = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S1
   reshape2::melt(.)%>%
   group_by(group, variable) %>%
   filter(!(abs(value - median(value)) > 2*sd(value))) %>%
-  summarise_each(funs(mean), value) 
+  summarise_each(funs(mean), value) %>%
+  group_by(group) %>%
+  mutate(., value = value*(1/sum(value)))%>%
+  as.data.frame(.)
+  
+sum(SLDF$value)
 
 SLDF$variable=factor(SLDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
