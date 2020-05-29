@@ -28,7 +28,7 @@ library(gridExtra)
 #install.packages("phangorn")
 #install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
 library(pairwiseAdonis)
-install.packages("RColorBrewer")
+#install.packages("RColorBrewer")
 library(RColorBrewer)
 
 #if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -353,7 +353,7 @@ plot_frequency(ps, taxa_names(ps)[c(55,2)], conc = "Qbit2") + xlab("DNA Concentr
 #library(dplyr)
 #library(ggplot2)
 require(tidyr)
-#ps.tree=readRDS("~/PigLungs/pstree.RDS")
+ps.tree=readRDS("~/PigLungs/pstree.RDS")
 
 #transform sample counts to relative abundance
 ps.r=transform_sample_counts(ps.tree,function(x) x/sum(x))
@@ -599,7 +599,7 @@ g2=ggplot(Shannon, aes(SampleType, Shannon, fill = Farm)) + geom_boxplot() + exp
 
 g=grid.arrange(g1, g2, nrow = 1)
 
-ggsave(file="~/PigLungs/PublicationFigures/EnvalphaDiv.PDF", g, width = 12, height = 6, units = "in")
+#ggsave(file="~/PigLungs/PublicationFigures/EnvalphaDiv.PDF", g, width = 12, height = 6, units = "in")
 
 fit = aov(PD ~ Farm*SampleType, data =  PD)
 plot(fit)
@@ -944,7 +944,7 @@ STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","swab_A", "swab_B", "tiss
 
 g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
 
-ggsave(file="~/PigLungs/PublicationFigures/STAvgNCAT.PDF", g, width = 10, height = 10, units = "cm")
+#ggsave(file="~/PigLungs/PublicationFigures/STAvgNCAT.PDF", g, width = 10, height = 10, units = "cm")
 
 STDF_NCAT = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
   reshape2::melt(.)
@@ -955,7 +955,20 @@ STDF_NCAT$Group=factor(STDF_NCAT$Group,levels=c("lavage","A_swab", "B_swab", "B_
 
 g=ggplot(STDF_NCAT, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
 
-ggsave(file="~/PigLungs/PublicationFigures/STNCAT.PDF", g, width = 20, height = 10, units = "cm")
+#ggsave(file="~/PigLungs/PublicationFigures/STNCAT.PDF", g, width = 20, height = 10, units = "cm")
+
+fit = aov(value ~ variable*Group, data = STDF_NCAT)
+plot(fit)
+
+summary(fit)
+
+TukeyHSD(fit)
+
+shapiro.test(STDF_NCAT$value) #p = 1e-11
+
+kruskal.test(value ~ variable, data = STDF_NCAT) #p<0.05
+
+pairwise.wilcox.test(STDF_NCAT$value, STDF_NCAT$variable, p.adjust.method = "BH")
 ```
 
 ```{r, make ST files for FOF}
@@ -1056,7 +1069,7 @@ STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","swab_A", "swab_B", "tiss
 
 g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
 
-ggsave(file="~/PigLungs/PublicationFigures/STAvgFOF.PDF", g, width = 10, height = 10, units = "cm")
+#ggsave(file="~/PigLungs/PublicationFigures/STAvgFOF.PDF", g, width = 10, height = 10, units = "cm")
 
 STDF_FOF = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
   reshape2::melt(.)
@@ -1067,7 +1080,13 @@ STDF_FOF$Group=factor(STDF_FOF$Group,levels=c("lavage","A_swab", "B_swab", "B_ti
 
 g=ggplot(STDF_FOF, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
 
-ggsave(file="~/PigLungs/PublicationFigures/STFOF.PDF", g, width = 20, height = 10, units = "cm")
+#ggsave(file="~/PigLungs/PublicationFigures/STFOF.PDF", g, width = 20, height = 10, units = "cm")
+
+shapiro.test(STDF_FOF$value) #p = 1e-11
+
+kruskal.test(value ~ variable, data = STDF_FOF)
+
+pairwise.wilcox.test(STDF_FOF$value, STDF_FOF$variable, p.adjust.method = "BH")
 ```
 
 ```{r, aggregation of sourcetracker txt files into dataframe, swab/lavage analysis, I really should have written a function here and used purrr}
