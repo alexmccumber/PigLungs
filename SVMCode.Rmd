@@ -3,38 +3,40 @@ title: "Untitled"
 output: html_document
 ---
 ```{r}
-if (!requireNamespace("BiocManager", quietly = TRUE))
+#if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
 
-BiocManager::install("rhdf5")
+#BiocManager::install("rhdf5")
 ```
 
 ```{r}
-if (packageVersion("devtools") < 1.6) {
+#if (packageVersion("devtools") < 1.6) {
   install.packages("devtools")
 }
-devtools::install_github("hadley/lazyeval")
-devtools::install_github("hadley/dplyr")
+#devtools::install_github("hadley/lazyeval")
+#devtools::install_github("hadley/dplyr")
 ```
 
 
 ```{r, Create DFs for SVM classifier}
-if (!requireNamespace("BiocManager", quietly = TRUE))
+#if (!requireNamespace("BiocManager", quietly = TRUE))
     install.packages("BiocManager")
-install.packages("colorspace", repos = "http://R-Forge.R-project.org")
-BiocManager::install("phyloseq", version = "3.10")
+#install.packages("colorspace", repos = "http://R-Forge.R-project.org")
+#BiocManager::install("phyloseq", version = "3.10")
 library(phyloseq)
-install.packages("dplyr")
+#install.packages("dplyr")
 library(dplyr)
 library(gmodels)
 library(e1071)
 require(dplyr)
+library(ggplot2)
 
 ps.prok=readRDS("~/PigLungs/ps.prok.RDS")
 
 SVM.Genus = subset_samples(ps.prok, sample_data(ps.prok)$Sample != "NTC" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleName != "NCAT_AIR_BLANK_S73") %>%
   transform_sample_counts(., function(x) x / sum(x)) %>%
-  tax_glom(., taxrank = "Genus")
+  tax_glom(., taxrank = "Order") #%>%
+  filter_taxa(., function(x) mean(x) > 1e-3, TRUE)
 
 SVM.Rel = subset_samples(ps.prok, sample_data(ps.prok)$Sample != "NTC" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.prok)$SampleName != "NCAT_AIR_BLANK_S73") %>%
   transform_sample_counts(., function(x) x / sum(x)) %>%
@@ -46,6 +48,14 @@ SVM.ps = subset_samples(ps.prok, sample_data(ps.prok)$Sample != "NTC" & sample_d
 SampleDF = filter(SampleDF.merged, SampleName %in% sample_names(SVM.Rel)) %>%
   `rownames<-`(.[,1]) %>%
   select("Sample", "Farm") 
+
+SVM.ord <- ordinate(SVM.Genus, "NMDS", "canberra")
+plot_ordination(SVM.Genus, SVM.ord, type="samples", color = "Farm", shape = "Sample")+stat_ellipse()
+
+#generate random labels to make model
+x = as.data.frame(sample(x = c("WCF", "NCAT"),size =40, replace =T, prob = c(0.5,0.5)))
+x
+
 ```
 
 ```{r, create function for all environments}
@@ -62,12 +72,15 @@ Rel.Env = DF_gen(SVM.Rel, "Environment")
 
 Rel.Pig = DF_gen(SVM.Rel, "Pig")
 
-Genus.Env = DF_gen(SVM.Genus, "Environment")
+Order.Env = DF_gen(SVM.Genus, "Environment")
 
-Genus.Pig = DF_gen(SVM.Genus, "Pig")
+Order.Pig = DF_gen(SVM.Genus, "Pig")
+```
 
-write.csv(Genus.Env, "~/PigLungs/GenusEnv.csv")
-write.csv(Genus.Pig, "~/PigLungs/GenusPig.csv")
+
+```{r, create function for all environments}
+write.csv(Order.Env, "~/PigLungs/OrderEnv.csv")
+write.csv(Order.Pig, "~/PigLungs/OrderPig.csv")
 
 write.csv(Rel.Env, "~/PigLungs/RelEnv.csv")
 write.csv(Rel.Pig, "~/PigLungs/RelPig.csv")
@@ -89,5 +102,27 @@ svm_tune <- tune(svm, train.x=trainX, train.y=trainY,
 
 colSums(trainX)
 print(svm_tune)
+```
+
+```{r}
+fish.ps = subset_samples(fishy.ps, sample_data(fishy.ps)$SL > 0) %>%
+  subset_samples(., sample_names(fishy.ps) != "7R.F2c") %>%
+  prune_species(speciesSums(.) > 0, .) %>%
+  transform_sample_counts(., function(x) x / sum(x)) %>%
+  filter_taxa(., function(x) mean(x) > 1e-3, TRUE)
+#%>%
+  vegan_otu(.) %>%
+  as.data.frame(.) %>%
+  .[,1:300]
+
+sample_names(fishy.ps)
+
+write.csv(fish.ps, "~/PigLungs/fishSVM.csv")
+
+rowSums(fish.ps)
+
+%>%
+  transform_sample_counts(., function(x) x / sum(x)) %>%
+  filter_taxa(., function(x) mean(x) > 1e-3, TRUE)
 ```
 
