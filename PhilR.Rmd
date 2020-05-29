@@ -1,0 +1,354 @@
+---
+title: "Philr"
+output: html_document
+---
+
+```{r}
+#BiocManager::install("philr")
+library(philr)
+library(phyloseq)
+library(ape)
+library(ggplot2)
+library(vegan)
+library(dplyr)
+library(tidyr)
+library(pairwiseAdonis)
+library(e1071)
+library(glmnet)
+library(ggtree)
+library(tibble)
+```
+
+```{r}
+#need to get phyloseq object (pstree.RDS) either from github or run PigLungCode.Rmd to generate file
+ps.tree=readRDS("~/PigLungs/pstree.RDS")
+
+Philr = subset_samples(ps.tree, sample_data(ps.tree)$Sample != "NTC" & sample_data(ps.tree)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.tree)$SampleName != "NCAT_AIR_BLANK_S73") %>%
+  subset_taxa(., Kingdom == "Bacteria") %>%
+  filter_taxa(., function(x) sum(x > 3) > (0.2*length(x)), TRUE) %>%
+  #filter_taxa(., function(x) sd(x)/mean(x) > 3.0, TRUE) %>%
+  transform_sample_counts(., function(x) x+1)
+
+is.rooted(phy_tree(Philr))
+
+is.binary.tree(phy_tree(Philr))
+
+phy_tree(Philr) <- makeNodeLabel(phy_tree(Philr), method="number", prefix='n')
+
+name.balance(phy_tree(Philr), tax_table(Philr), 'n1')
+
+otu.table <- vegan_otu(otu_table(Philr))
+tree <- phy_tree(Philr)
+metadata <- sample_data(Philr)
+tax <- tax_table(Philr)
+
+gp.philr <- philr(otu.table, tree, 
+                  part.weights='enorm.x.gm.counts', 
+                  ilr.weights='blw.sqrt')
+
+gp.dist <- dist(gp.philr, method="euclidean")
+gp.pcoa <- ordinate(Philr, 'PCoA', distance=gp.dist)
+plot_ordination(Philr, gp.pcoa, type="samples", color = "Sample", shape = "Farm") + stat_ellipse()
+
+metadf = data.frame(sample_data(Philr))
+metadf=unite(metadf, FarmSample, c(Farm, Sample), remove = F)
+
+permanova = adonis(gp.dist ~ FarmSample, data = metadf)
+
+permanova
+
+pairwise.adonis(gp.dist, metadf$FarmSample)#no different from unifrac
+```
+
+```{r}
+#install.packages("glmnet")
+library(glmnet)
+library(dplyr)
+library(philr)
+library(ggtree)
+
+PhilrNCAT = subset_samples(ps.tree, sample_data(ps.tree)$Sample != "NTC" & sample_data(ps.tree)$SampleName != "WCF_AIR_BLANK_S92" & sample_data(ps.tree)$SampleName != "NCAT_AIR_BLANK_S73" & sample_data(ps.tree)$Farm == "NCAT" & sample_data(ps.tree)$Sample == "Pig")  %>%
+  filter_taxa(., function(x) sum(x > 3) > (0.2*length(x)), TRUE) %>%
+  #filter_taxa(., function(x) sd(x)/mean(x) > 3.0, TRUE) %>%
+  transform_sample_counts(., function(x) x+1)
+
+is.rooted(phy_tree(PhilrNCAT))
+
+is.binary.tree(phy_tree(PhilrNCAT))
+
+phy_tree(PhilrNCAT) <- makeNodeLabel(phy_tree(Philr), method="number", prefix='n')
+
+name.balance(phy_tree(PhilrNCAT), tax_table(PhilrNCAT), 'n1')
+
+otu.table <- vegan_otu(otu_table(PhilrNCAT))
+tree <- phy_tree(PhilrNCAT)
+metadata <- sample_data(PhilrNCAT)
+tax <- tax_table(PhilrNCAT)
+
+gp.philr <- philr(otu.table, tree, 
+                  part.weights='enorm.x.gm.counts', 
+                  ilr.weights='blw.sqrt')
+
+sample_data(PhilrNCAT)$SLS = factor(get_variable(PhilrNCAT, "SampleType") %in% c("Swab", "Lavage"))
+
+sample_data(PhilrNCAT)$SLS
+
+sample_names(PhilrNCAT)
+
+glmmod = glmnet(gp.philr, sample_data(PhilrNCAT)$SLS, alpha =1 , family = "binomial")
+
+top.coords <- as.matrix(coefficients(glmmod, s=0.1))
+top.coords <- rownames(top.coords)[which(top.coords != 0)]
+(top.coords <- top.coords[2:length(top.coords)])
+
+tc.names <- sapply(top.coords, function(x) name.balance(tree, tax, x))
+tc.names
+```
+
+```{r}
+gp.philrDF = as.data.frame(gp.philr)
+
+gp.philrDF$Farm = as.factor(metadata$Farm)
+
+gp.philrDF$Sample = metadata$Sample
+
+gp.philrDF$SampleType = metadata$SampleType
+
+philrPig = subset(gp.philrDF, gp.philrDF$Sample == "Pig")
+
+philrEnv = subset(gp.philrDF, gp.philrDF$Sample == "Environment")
+
+philrTissue = subset(gp.philrDF, gp.philrDF$SampleType == "Tissue")
+
+philrSandL = subset(gp.philrDF, gp.philrDF$SampleType == "Swab" | gp.philrDF$SampleType == "Lavage")
+
+philrEnv$Sample = NULL
+philrPig$Sample = NULL
+philrTissue$Sample = NULL
+philrSandL$Sample = NULL
+philrEnv$SampleType = NULL
+philrPig$SampleType = NULL
+philrTissue$SampleType = NULL
+philrSandL$SampleType = NULL
+
+PigSVMClass$Farm = philrPig$Farm
+TissueSVMClass = select(philrTissue, Farm)
+SandLSVMClass = select(philrSandL, Farm)
+
+philrPig$Farm = NULL
+philrTissue$Farm = NULL
+philrSandL$Farm = NULL
+```
+
+```{r, linear doesn't perform as well used e1071 package}
+# Find the SVM tuning parameters
+svm_tune <- tune(svm, Farm~., data= philrEnv, type = "C", tunecontrol = tune.control(sampling = "cross", cross = 5),
+                 kernel="linear", ranges=list(cost=10^seq(-3,4), gamma= 1^(-1:1)))
+
+print(svm_tune)
+
+# create the SVM model
+svm_model_after_tune <- svm(Farm ~ ., data=philrEnv, kernel="linear",
+                            cost=svm_tune$best.parameters$cost,
+                            gamma=svm_tune$best.parameters$gamma)
+summary(svm_model_after_tune)
+
+# Test the SVM model
+predTestset <- predict(svm_model_after_tune,philrPig)
+table(predTestset, PigSVMClass$Farm)
+```
+
+```{r, try caret package with linear, not so good as radial}
+library(caret)
+
+trctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 3)
+ 
+svm_Linear <- train(Farm ~., data = philrEnv, method = "svmLinear",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+
+svm_Linear
+
+test_pred <- predict(svm_Linear, newdata = philrPig)
+test_pred
+
+confusionMatrix(PigSVMClass$Farm, test_pred)
+
+grid <- expand.grid(C = c(0,0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,5))
+
+svm_Linear_Grid <- train(Farm ~., data = philrEnv, method = "svmLinear",
+                    trControl=trctrl,
+                    preProcess = c("center", "scale"),
+                    tuneGrid = grid,
+                    tuneLength = 10)
+
+svm_Linear_Grid
+
+test_pred <- predict(svm_Linear_Grid, newdata = philrPig)
+
+
+svm_Radial <- train(Farm ~., data = philrEnv, method = "svmRadial",
+  trControl=trctrl,
+  preProcess = c("center", "scale"),
+  tuneLength = 10)
+svm_Radial
+
+test_pred <- predict(svm_Radial, newdata = philrPig)
+test_pred
+
+confusionMatrix(PigSVMClass$Farm, test_pred)
+
+grid_radial <- expand.grid(sigma = c(0,0.01, 0.02, 0.025, 0.03, 0.04,
+ 0.05, 0.06, 0.07,0.08, 0.09, 0.1, 0.25, 0.5, 0.75,0.9),
+ C = c(0,0.01, 0.05, 0.1, 0.25, 0.5, 0.75,
+ 1, 1.5, 2,5))
+
+svm_Radial_Grid <- train(Farm ~., data = philrEnv, method = "svmRadial",
+                    trControl=trctrl,
+                    preProcess = c("center", "scale"),
+                    tuneGrid = grid_radial,
+                    tuneLength = 10)
+```
+
+```{r, Final Model creation used for pub}
+library(caret)
+gc_ctrl1 <- trainControl(method = "repeatedcv",
+                    number = 5,
+                    repeats = 5,
+                    classProbs = TRUE,
+                    summaryFunction = twoClassSummary,
+                    savePredictions = TRUE)
+
+gc_train1 <- train(Farm~., philrEnv,
+              method = "svmRadial",
+              # train() use its default method of calculating an analytically derived estimate for sigma
+              tuneLength = 5,# 5 arbitrary values for C and sigma = 25 models
+              trControl = gc_ctrl1,
+              preProc = c("center", "scale"),
+              metric = "ROC",
+              verbose = FALSE)
+
+library(kernlab)
+
+gc_train1$finalModel
+
+plot(gc_train1)
+
+mean(gc_train1$results[,"ROC"])
+
+test_pred <- predict(gc_train1, newdata = philrPig)
+
+confusionMatrix(PigSVMClass$Farm, test_pred)
+
+cfm = confusionMatrix(PigSVMClass$Farm, test_pred)
+
+library(scales)
+
+g=ggplot(data = as.data.frame(cfm$table) ,
+  aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = log(Freq)), colour = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  geom_text(aes(x = Prediction, y = Reference, label = Freq)) +
+  theme(legend.position = "none") +
+  ggtitle("Accuracy 86% Kappa 63%")
+
+ggsave(file="~/PigLungs/PublicationFigures/ConfusionMatrix.PDF", g, width = 10, height = 10, units = "cm")
+
+p = ggplotConfusionMatrix(cfm)
+
+test_pred <- predict(gc_train1, newdata = philrTissue)
+
+confusionMatrix(TissueSVMClass$Farm, test_pred)
+
+test_pred <- predict(gc_train1, newdata = philrSandL)
+
+confusionMatrix(SandLSVMClass$Farm, test_pred)
+
+write.csv(philrEnv, "~/PigLungs/SVMDir/philrEnv.csv")
+write.csv(philrSandL, "~/PigLungs/SVMDir/philrSL.csv")
+write.csv(philrTissue, "~/PigLungs/SVMDir/philrTissue.csv")
+write.csv(TissueSVMClass, "~/PigLungs/SVMDir/TissueClass.csv")
+write.csv(SandLSVMClass, "~/PigLungs/SVMDir/SLClass.csv")
+```
+
+```{r, rerun with reduced features but not worth it}
+#explore dataset and extract top features
+importance <- varImp(gc_train1, scale=FALSE)
+
+print(importance)
+#get list of top 20 features
+names = list("n134","n46","n122","n105","n80","n59","n156","n125","n174","n175","n218","n140","n69","n93","n139","n279","n274","n103","n119","n157")
+
+impDF = as.data.frame(importance[["importance"]]) %>%
+  subset(., rownames(.) %in% names) %>%
+  select(., NCAT)
+
+philrEnv20 = select(philrEnv, c("n134","n46","n122","n105","n80","n59","n156","n125","n174","n175","n218","n140","n69","n93","n139","n279","n274","n103","n119","n157","Farm"))
+
+philrPig20 = select(philrPig, c("n134","n46","n122","n105","n80","n59","n156","n125","n174","n175","n218","n140","n69","n93","n139","n279","n274","n103","n119","n157"))
+
+#get reduced feature set for svm to rerun analysis
+gc_train1 <- train(Farm~., philrEnv20,
+              method = "svmRadial",
+              tuneLength = 5,
+              trControl = gc_ctrl1,
+              preProc = c("center", "scale"),
+              metric = "ROC",
+              verbose = FALSE)
+
+test_pred <- predict(gc_train1, newdata = philrPig20)
+
+confusionMatrix(PigSVMClass$Farm, test_pred)
+
+name.balance(phy_tree(Philr), tax_table(Philr), 'n157')
+votes = name.balance(phy_tree(Philr), tax_table(Philr), 'n175', return.votes = c('up', 'down'))
+votes[[c('down.votes','Genus')]]
+```
+
+
+```{r, graphs for SVM factors, not used in paper}
+library(dplyr)
+library(tibble)
+ps.dietzia=subset_taxa(ps.rncp, Genus=="Dietzia") %>%
+  subset_samples(., SampleSubtype!="NTC") %>%
+  vegan_otu(.) %>%
+  as.data.frame(.) %>%
+  rownames_to_column("SampleName") %>%
+  mutate(Total=rowSums(select_if(., is.numeric))) %>%
+  select(., c(SampleName, Total)) %>%
+  merge(.,metadf, by = "SampleName") %>%
+  select(., c(SampleName, Sample, SampleType, Total, Farm))
+
+ps.dietzia$SampleType=factor(ps.dietzia$SampleType,levels=c("Lavage","Swab", "Tissue", "Air", "Food", "Water", "Soil"))
+
+library(ggplot2)
+
+g=ggplot(ps.dietzia, aes(SampleType, Total)) + facet_grid(. ~ Farm) + stat_boxplot(fill = NA) + ggtitle("Dietzia") + labs(x = "Sample Type", y = "Relative Abundance")
+g
+```
+
+```{r, use nodes to produce each graph and save}
+#library(dplyr)
+#library(tibble)
+#library(ggplot2)
+
+ps.graph=subset_taxa(ps.rncp, Genus=='Psychrobacter') %>%
+  subset_samples(., SampleSubtype!="NTC" & Farm == "NCAT") %>%
+  vegan_otu(.) %>%
+  as.data.frame(.) %>%
+  rownames_to_column("SampleName") %>%
+  mutate(Total=rowSums(select_if(., is.numeric))) %>%
+  select(., c(SampleName, Total)) %>%
+  merge(.,metadf, by = "SampleName") %>%
+  select(., c(SampleName, Sample, SampleType, Total, Farm)) %>%
+  subset(., Sample == "Pig" | SampleType == "Air")
+
+ps.graph$SampleType=factor(ps.graph$SampleType,levels=c("Lavage","Swab", "Tissue", "Air"))
+
+fg=ggplot(ps.graph, aes(SampleType, Total)) + facet_grid(. ~ Farm) + stat_boxplot(fill = NA) + ggtitle("Brevibacterium") + labs(x = "Sample Type", y = "Relative Abundance")
+g
+```
+
+
+
