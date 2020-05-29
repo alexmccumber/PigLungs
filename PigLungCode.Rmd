@@ -387,8 +387,6 @@ pairwise.adonis(unifrac.dist, metadf$FarmSample) #pairwise testing with adonis s
 ```
 
 ```{r, create ordination for env and lungs samples and PERMANOVA}
-require(ggplot2)
-
 ps.Env = subset_samples(ps.rncp, sample_data(ps.rncp)$Sample == "Environment" & sample_data(ps.rncp)$Date != "Blank") %>%
   prune_species(speciesSums(.) > 0, .)
 
@@ -629,7 +627,6 @@ subset_samples(ps.rncp, sample_data(ps.r)$Sample=="Pig" & sample_data(ps.r)$Farm
 
 ```{r, Lefse object for Pig swab and lavage samples}
 ps.pig=subset_samples(ps.rncp, sample_data(ps.rncp)$Sample=="Pig") %>%
-  subset_samples(., sample_data(ps.rncp)$SampleType == "Lavage" | sample_data(ps.rncp)$SampleType == "Swab") %>%
   prune_species(speciesSums(.) >0, .)
 
 sample_names(ps.pig) #make sure we have the samples we want
@@ -646,6 +643,9 @@ lefse.pig$Genus=NULL
 
 LEFseMeta = as.data.frame(sample_data(ps.pig)) %>%
   select(., c(SampleType,Farm,SampleName)) %>%
+  mutate(SampleType = str_replace(SampleType, "Tissue", "Lower")) %>%
+  mutate(SampleType = str_replace(SampleType, "Swab", "Upper")) %>%
+  mutate(SampleType = str_replace(SampleType, "Lavage", "Upper")) %>%
   t(.) %>%
   as.data.frame(.) %>%
   mutate(., Info=row.names(.))
@@ -660,27 +660,90 @@ write.csv(lefse.out, "~/PigLungs/lefsepig.csv", quote = FALSE)
 UpperLower = read.csv("~/PigLungs/LEfsEResultsUpperLower.csv") %>%
   mutate(., Genus = ï..Genus)
 
+#set levels by LDA score
 UpperLower$Genus=factor(UpperLower$Genus,levels=c("Delftia", "Yersinia", "Megasphaera", "Aerococcus", "Dictyoglomus", "Tepidiphilus", "Caldicellulosiruptor", "Escherichia_Shigella", "Streptococcus", "Anoxybacillus", "Psychrobacter", "Lachnospiraceae_XPB1014_group", "Lactobacillus", "Atopostipes", "Lachnospiraceae_AC2044_group", "Collinsella", "Fervidobacterium", "IheB3_7", "Bergeyella", "Peptoclostridium", "Oscillospira", "Ignavigranum", "dgA_11_gut_group"))
-
-require(ggplot2)
 
 p=ggplot(UpperLower, aes(x=Genus,y=LDAScore))+geom_col(aes(fill=Location))+coord_flip()+theme_classic()
 
-p
+ggsave(file="~/PigLungs/PublicationFigures/lefse.PDF", p, width = 20, height = 20, units = "cm")
 ```
 
-```{r}
-glom=tax_glom(ps.NCAT.fr5, taxrank="Genus")
-UpperLower$Genus=factor(c("Delftia", "Yersinia", "Megasphaera", "Aerococcus", "Dictyoglomus", "Tepidphilus", "Caldicellulosiruptor", "Escherichia_Shigella", "Streptococcus", "Anoxybacillus", "Psychrobacter", "Lachnospiracaea_XPB1014_group", "Lactobacillus", "Atopostipes", "Lachnospiraceae_AC2044_group", "Collinsella", "Fervidobacterium", "IheB3_7", "Bergeyella", "Peptoclostridium", "Oscillospira", "Ignavigranum", "dgA_11_gut_group"))
+```{r, function for getting phyloseq object into usable format for SourceTracker}
+#I found this online and for the life of me can't remember where it came from
+
+function(ps, filePATH, filePREFIX, writeFASTA=TRUE, rename=FALSE, useREFSEQ=FALSE){
+  
+  #pull seqs from refseq slot or extract from ASV ID for fasta format
+  if (isTRUE(useREFSEQ)){
+    #from phyloseq refseq slot
+    f.onames <- phyloseq::refseq(ps)
+  } else {
+    f.onames <- phyloseq::taxa_names(ps)
+  }
+  
+  if (isTRUE(rename)){
+    phyloseq::taxa_names(ps) <- paste("ASV", 1:length(phyloseq::taxa_names(ps)), sep = "")
+    names(f.onames) <- paste0(">", phyloseq::taxa_names(ps))
+  } else {
+    names(f.onames) <- paste0(">", phyloseq::taxa_names(ps))
+  }
+  
+  
+  #generate asv table formatted for biom generation
+  asv.tab <- format.ASV.tab(ps)
+  suppressWarnings(asv.tab <- as.matrix(asv.tab))
+  cb <- as.matrix(cbind(rownames(asv.tab), asv.tab))
+  rcb <- as.matrix(rbind(colnames(cb), cb))
+  rcb[1,1] <- "#ASVID"
+  rownames(rcb) <- NULL
+  colnames(rcb) <- NULL
+  
+  #generate tax table formatted for biom generation
+  tax.tab <- as.data.frame(phyloseq::tax_table(ps))
+  tax.tab$taxonomy <- tidyr::unite_(tax.tab, "out", c(colnames(tax.tab)), sep = ";")
+  cbt <- as.matrix(cbind(rownames(tax.tab), tax.tab$taxonomy))
+  rcbt <- as.matrix(rbind(c("#ASVID", "taxonomy"), cbt))
+  rownames(cbt) <- NULL
+  colnames(cbt) <- NULL
+  
+  #generate sampledf table formatted for biom generation
+  samdf <- suppressWarnings(as.matrix(phyloseq::sample_data(ps)))
+  cbs <- as.matrix(cbind(rownames(samdf), samdf))
+  rcbs <- as.matrix(rbind(colnames(cbs), cbs))
+  rcbs[1,1] <- "#SampleID"
+  rownames(rcbs) <- NULL
+  colnames(rcbs) <- NULL
+  
+  #create output string
+  if (isTRUE(writeFASTA)){
+    fa <- print(paste0(filePATH, filePREFIX, "_ASVs.fasta"))
+  }
+  otb <- print(paste0(filePATH, filePREFIX, "_ASV_table.txt"))
+  ttb <- print(paste0(filePATH, filePREFIX, "_ASV_taxonomy.txt"))
+  stb <- print(paste0(filePATH, filePREFIX, "_sample_data.txt"))
+  
+  
+  #write output
+  #ASV fasta 
+  if (isTRUE(writeFASTA)){
+    write.table(x = f.onames, file = fa, quote = FALSE, sep = "\n", col.names = FALSE)
+  }
+  #asv.tab
+  write.table(x = rcb, file = otb, row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+  #tax.tab
+  write.table(x = rcbt, file = ttb, row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+  #sampledf
+  write.table(x = rcbs, file = stb, row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+  
+  #return phyloseq object with taxa renamed to ASV1, etc., if desired
+  if (isTRUE(rename)){
+    return(ps)
+  }
+}
 
 ```
 
-```{r}
-p=ggplot(TissueAbun, aes(x=Location, y=Abundance))+geom_boxplot()+facet_grid(~Farm)
-p
-```
-
-```{r, attempt at SourceTracker for NCAT, not using this analysis}
+```{r,SourceTracker for NCAT}
 #remove all samples that aren't NCAT or what we care about
 ps.NCAT = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "NCAT" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleSubtype != "NTC" & sample_data(ps.prok)$SampleSubtype != "Blank")
 
@@ -780,33 +843,23 @@ write.dataset(ps.NCAT_s1, "~/PigLungs/sourcetracker/", "NCAT_s16")
 ```
 
 ```{bash, bash input for sourcetracker for NCAT}
+#Need to download sourcetracker_for_qiime.r
 #set filepaths in environment
 echo "export SOURCETRACKER_PATH=$HOME/Documents/PigLungs/sourcetracker" >> ~/.bash_profile
 source ~/.bash_profile
 
+#Didn't realize write.dataset would have some of the wrong column names and be missing a row after all the dataset were written so I did the following in excel
 #need to set up sourcetracker software add source/sink row to sample_data and one extra row beginning with a # on ASV table
+#environmental samples were source and pig samples were sinks
 
+Rscript sourcetracker_for_qiime.r -i NCAT_lavage_sourcetracker_ASV_table.txt -m NCAT_lavage_sourcetracker_sample_data.txt -o lavage_full_NCAT -v -n 25
 
-Rscript sourcetracker_for_qiime.r -i WCF_lavage_sourcetracker_ASV_table.txt -m WCF_lavage_sourcetracker_sample_data.txt -o lavage_full_WCF -v -n 25
+Rscript sourcetracker_for_qiime.r -i NCAT_tissue_sourcetracker_ASV_table.txt -m NCAT_tissue_sourcetracker_sample_data.txt -o tissue_full_NCAT -v -n 25
+
+Rscript sourcetracker_for_qiime.r -i NCAT_swab_sourcetracker_ASV_table.txt -m NCAT_swab_sourcetracker_sample_data.txt -o swab_full_NCAT -v -n 25
 ```
 
-```{r}
-ps.WCF = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
-
-write.dataset(ps.WCF, "~/PigLungs/sourcetracker/", "WCF_lavage_sourcetracker")
-
-ps.WCF_Swab = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
-
-write.dataset(ps.WCF_Swab, "~/PigLungs/sourcetracker/", "WCF_swab_sourcetracker")
-
-ps.WCF_Tissue = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "WCF" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "WCF_AIR_BLANK_S92")
-
-write.dataset(ps.WCF_Tissue, "~/PigLungs/sourcetracker/", "WCF_tissue_sourcetracker")
-
-
-```
-
-```{r, aggregation of sourcetracker txt files into dataframe for NCAT}
+```{r, aggregation of sourcetracker txt files into dataframe for NCAT to show average}
 tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
   select(., -c(farm, sampletype, plateID)) %>%
@@ -818,11 +871,17 @@ tissue_ST_all = tissue_ST %>%
   select(., -SampleID)
   
 tissue_ST_avg = tissue_ST %>%
-  group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
+  reshape2::melt(.) %>%
+  group_by(group, variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value) %>%
   mutate(., sampletype = "tissue") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
+  unite(., Group, sampletype, group, sep = "_") %>%
+  group_by(.,Group) %>%
+  mutate(., value = value*(1/sum(value)))%>%
+  as.data.frame(.)
+
+sum(tissue_ST_avg$value)
   
 lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>%
   mutate(.,Group = "lavage")
@@ -830,11 +889,18 @@ lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_NCAT/sink_predictions
 lavage_ST_all = lavage_ST %>%
   select(., -SampleID)
 
-lavage_ST_avg=lavage_ST %>% 
-  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
-  summarise_each(., funs(mean)) %>%
+lavage_ST_avg=lavage_ST %>%
+  reshape2::melt(.) %>%
+  group_by(variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value)%>%
   mutate(., Group = "lavage") %>%
-  select(., -c(farm, plateID, SampleID, sampletype))
+#since outliers were removed data no longer adds up to 1, so need to normalize each value to get to 1
+  mutate(., value = value*(1/sum(value)))%>%
+  as.data.frame(.)
+
+#check that normalization worked
+sum(lavage_ST_avg$value)
 
 swab_ST=read.table("~/PigLungs/sourcetracker/swab_full_NCAT/sink_predictions.txt",header = T, sep = "\t") %>% 
   separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
@@ -847,21 +913,27 @@ swab_ST_all = swab_ST %>%
   select(., -SampleID)
 
 swab_ST_avg = swab_ST %>%
-  group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
+  reshape2::melt(.) %>%
+  group_by(group, variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value) %>%
   mutate(., sampletype = "swab") %>%
-  unite(., Group, group, sampletype) %>%
-  select(., -SampleID)
+  unite(., Group, sampletype, group, sep = "_") %>%
+  group_by(.,Group) %>%
+  mutate(., value = value*(1/sum(value))) %>%
+  as.data.frame(.)
 
-STDF_avg = bind_rows(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) %>%
-  #mutate(., Swab.Lavage = 0) %>%
-  reshape2::melt(.)
+sum(swab_ST_avg$value)
+
+STDF_avg = rbind(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) 
 
 STDF_avg$variable=factor(STDF_avg$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
 
-STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
+STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","swab_A", "swab_B", "tissue_B", "tissue_A"))
 
-ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+g=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
+
+ggsave(file="~/PigLungs/PublicationFigures/STAvgNCAT.PDF", g, width = 10, height = 10, units = "cm")
 
 STDF_NCAT = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
   reshape2::melt(.)
@@ -870,15 +942,124 @@ STDF_NCAT$variable=factor(STDF_NCAT$variable,levels=c("Food","Water", "Soil", "U
 
 STDF_NCAT$Group=factor(STDF_NCAT$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
 
-g=ggplot(STDF_NCAT, aes(Group, value)) + facet_grid(. ~ variable) + stat_boxplot(fill = NA) + theme_classic()#+ geom_jitter(width = 0.2, alpha = 0.5, aes(color = Group))+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))
+g=ggplot(STDF_NCAT, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
 
-g
+ggsave(file="~/PigLungs/PublicationFigures/STNCAT.PDF", g, width = 20, height = 10, units = "cm")
+```
+
+```{r, make ST files for FOF}
+ps.FOF = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "FOF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleName != "FOF_AIR_BLANK_S92")
+
+write.dataset(ps.FOF, "~/PigLungs/sourcetracker/", "FOF_lavage_sourcetracker")
+
+ps.FOF_Swab = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "FOF" & sample_data(ps.prok)$SampleType != "Tissue" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "FOF_AIR_BLANK_S92")
+
+write.dataset(ps.FOF_Swab, "~/PigLungs/sourcetracker/", "FOF_swab_sourcetracker")
+
+ps.FOF_Tissue = subset_samples(ps.prok, sample_data(ps.prok)$Farm == "FOF" & sample_data(ps.prok)$SampleType != "Swab" & sample_data(ps.prok)$SampleType != "Lavage" & sample_data(ps.prok)$SampleName != "FOF_AIR_BLANK_S92")
+
+write.dataset(ps.FOF_Tissue, "~/PigLungs/sourcetracker/", "FOF_tissue_sourcetracker")
+```
+
+```{bash, bash input for sourcetracker for FOF}
+#Need to download sourcetracker_for_qiime.r
+#set filepaths in environment
+echo "export SOURCETRACKER_PATH=$HOME/Documents/PigLungs/sourcetracker" >> ~/.bash_profile
+source ~/.bash_profile
+
+#Didn't realize write.dataset would have some of the wrong column names and be missing a row after all the dataset were written so I did the following in excel
+#need to set up sourcetracker software add source/sink row to sample_data and one extra row beginning with a # on ASV table
+#environmental samples were source and pig samples were sinks
+
+Rscript sourcetracker_for_qiime.r -i FOF_lavage_sourcetracker_ASV_table.txt -m FOF_lavage_sourcetracker_sample_data.txt -o lavage_full_FOF -v -n 25
+
+Rscript sourcetracker_for_qiime.r -i FOF_tissue_sourcetracker_ASV_table.txt -m FOF_tissue_sourcetracker_sample_data.txt -o tissue_full_FOF -v -n 25
+
+Rscript sourcetracker_for_qiime.r -i FOF_swab_sourcetracker_ASV_table.txt -m FOF_swab_sourcetracker_sample_data.txt -o swab_full_FOF -v -n 25
+```
+
+```{r, aggregation of sourcetracker txt files into dataframe for FOF}
+tissue_ST=read.table("~/PigLungs/sourcetracker/tissue_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID)))
+
+tissue_ST_all = tissue_ST %>%
+  mutate(., sampletype = "tissue") %>%
+  unite(., Group, group, sampletype) %>%
+  select(., -SampleID)
+  
+tissue_ST_avg = tissue_ST %>%
+  reshape2::melt(.) %>%
+  group_by(group, variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value) %>%
+  mutate(., sampletype = "tissue") %>%
+  unite(., Group, sampletype, group, sep = "_") %>%
+  group_by(.,Group) %>%
+  mutate(., value = value*(1/sum(value)))%>%
+  as.data.frame(.)
+  
+lavage_ST=read.table("~/PigLungs/sourcetracker/lavage_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>%
+  mutate(.,Group = "lavage")
+
+lavage_ST_all = lavage_ST %>%
+  select(., -SampleID)
+
+lavage_ST_avg=lavage_ST %>%
+  reshape2::melt(.) %>%
+  group_by(variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value)%>%
+  mutate(., Group = "lavage") %>%
+#since outliers were removed data no longer adds up to 1, so need to normalize each value to get to 1
+  mutate(., value = value*(1/sum(value)))%>%
+  as.data.frame(.)
+
+swab_ST=read.table("~/PigLungs/sourcetracker/swab_full_WCF/sink_predictions.txt",header = T, sep = "\t") %>% 
+  separate(SampleID, c("farm", "sampletype", "SampleID", "plateID"), remove=T) %>%
+  select(., -c(farm, sampletype, plateID)) %>%
+  mutate(group = substr(SampleID, nchar(SampleID)-0, nchar(SampleID))) 
+
+swab_ST_all = swab_ST %>%
+  mutate(., sampletype = "swab") %>%
+  unite(., Group, group, sampletype) %>%
+  select(., -SampleID)
+
+swab_ST_avg = swab_ST %>%
+  reshape2::melt(.) %>%
+  group_by(group, variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value) %>%
+  mutate(., sampletype = "swab") %>%
+  unite(., Group, sampletype, group, sep = "_") %>%
+  group_by(.,Group) %>%
+  mutate(., value = value*(1/sum(value))) %>%
+  as.data.frame(.)
+
+STDF_avg = rbind(swab_ST_avg, lavage_ST_avg, tissue_ST_avg) 
+
+STDF_avg$variable=factor(STDF_avg$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
+
+STDF_avg$Group=factor(STDF_avg$Group,levels=c("lavage","swab_A", "swab_B", "tissue_B", "tissue_A"))
+
+ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = STDF_avg, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
+
+ggsave(file="~/PigLungs/PublicationFigures/STAvgFOF.PDF", g, width = 10, height = 10, units = "cm")
+
+STDF_FOF = bind_rows(swab_ST_all, lavage_ST_all, tissue_ST_all) %>%
+  reshape2::melt(.)
+
+STDF_FOF$variable=factor(STDF_FOF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air"))
+
+STDF_FOF$Group=factor(STDF_FOF$Group,levels=c("lavage","A_swab", "B_swab", "B_tissue", "A_tissue"))
+
+ggplot(STDF_FOF, aes(Group, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) + theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("FOF")
+
+ggsave(file="~/PigLungs/PublicationFigures/STFOF.PDF", g, width = 20, height = 10, units = "cm")
 ```
 
 ```{r, aggregation of sourcetracker txt files into dataframe, swab/lavage analysis, I really should have written a function here and used purrr}
-library(dplyr)
-library(tidyr)
-
 sample = read.table("~/PigLungs/sourcetracker/tissue_ST_from_swablavage/lavage_Sample1_NCAT/sink_predictions.txt", header = T, sep = "\t")
 
 S1 = sample %>% 
@@ -1030,41 +1211,25 @@ S16$group = paste0("tissue_", S16$group)
 S16$SampleID = paste0("tissue_", S16$SampleID)
 
 SLDF = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
-  group_by(group) %>%
-  summarise_each(., funs(mean)) %>%
-  select(., -SampleID) %>%
-  rename(Group = group) %>%
-  reshape2::melt(.)
-
-SLDF$Group = paste0("tissue_", SLDF$Group)
+  reshape2::melt(.)%>%
+  group_by(group, variable) %>%
+  filter(!(abs(value - median(value)) > 2*sd(value))) %>%
+  summarise_each(funs(mean), value) 
 
 SLDF$variable=factor(SLDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
-g = ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+g=ggplot() + geom_bar(aes(y = value, x = group, fill = variable), data = SLDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))+ theme_bw()+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
 
-ggsave(file="~/PigLungs/PublicationFigures/STforSLAvg.PDF", g, width = 10, height = 10, units = "cm")
-
-GradDF = bind_rows(SLDF, STDF)
-
-GradDF$Group=factor(GradDF$Group,levels=c("lavage","A_swab","B_swab","B_tissue", "A_tissue","tissue_B", "tissue_A"))
-
-GradDF$variable=factor(GradDF$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
-
-p=ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = GradDF, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
-
-g=ggplot(SLDF, aes(variable, value)) + facet_grid(. ~ Group) + stat_boxplot(fill = NA) + ggtitle("SourceTracker") + labs(x = "Sample Type", y = "Relative Abundance")+theme_classic()
-g
+ggsave(file="~/PigLungs/PublicationFigures/STforSLAvg.PDF", g, width = 5, height = 10, units = "cm")
 
 SLDF2 = bind_rows(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16) %>%
-  group_by(group) %>%
-  summarise_each(., funs(median)) %>%
-  select(., -SampleID) %>%
-  rename(Group = group) %>%
   reshape2::melt(.)
 
 SLDF2$variable=factor(SLDF2$variable,levels=c("Food","Water", "Soil", "Unknown", "Air", "Swab.Lavage"))
 
-ggplot() + geom_bar(aes(y = value, x = Group, fill = variable), data = SLDF2, stat ="identity")+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))
+g=ggplot(SLDF2, aes(variable, value)) + facet_grid(. ~ variable) + geom_boxplot(aes(fill = variable)) +facet_grid(~group)+ theme_bw()+scale_fill_manual(values=c( "green4", "royalblue", "brown", "grey52", "deepskyblue3", "chocolate"))+ylab("Relative Abundance")+xlab("Sample Type")+ggtitle("NCAT")
+
+ggsave(file="~/PigLungs/PublicationFigures/STforSL.PDF", g, width = 20, height = 10, units = "cm")
 ```
 
 
