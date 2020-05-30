@@ -213,6 +213,7 @@ svm_Radial_Grid <- train(Farm ~., data = philrEnv, method = "svmRadial",
 
 ```{r, Final Model creation used for pub}
 library(caret)
+set.seed(100)
 gc_ctrl1 <- trainControl(method = "repeatedcv",
                     number = 5,
                     repeats = 5,
@@ -253,17 +254,19 @@ g=ggplot(data = as.data.frame(cfm$table) ,
   theme(legend.position = "none") +
   ggtitle("Accuracy 86% Kappa 63%")
 
-ggsave(file="~/PigLungs/PublicationFigures/ConfusionMatrix.PDF", g, width = 10, height = 10, units = "cm")
+ggsave(file="~/PigLungs/PublicationFigures/ConfusionMatrix.PDF", g, width = 20, height = 20, units = "cm")
 
-p = ggplotConfusionMatrix(cfm)
+#p = ggplotConfusionMatrix(cfm)
 
-test_pred <- predict(gc_train1, newdata = philrTissue)
 
-confusionMatrix(TissueSVMClass$Farm, test_pred)
+#this is for the tissue sample stuff
+#test_pred <- predict(gc_train1, newdata = philrTissue)
 
-test_pred <- predict(gc_train1, newdata = philrSandL)
+#confusionMatrix(TissueSVMClass$Farm, test_pred)
 
-confusionMatrix(SandLSVMClass$Farm, test_pred)
+#test_pred <- predict(gc_train1, newdata = philrSandL)
+
+#confusionMatrix(SandLSVMClass$Farm, test_pred)
 
 write.csv(philrEnv, "~/PigLungs/SVMDir/philrEnv.csv")
 write.csv(philrSandL, "~/PigLungs/SVMDir/philrSL.csv")
