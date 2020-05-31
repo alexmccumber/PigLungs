@@ -187,6 +187,7 @@ svm_Linear_Grid
 
 test_pred <- predict(svm_Linear_Grid, newdata = philrPig)
 
+confusionMatrix(PigSVMClass$Farm, test_pred)
 
 svm_Radial <- train(Farm ~., data = philrEnv, method = "svmRadial",
   trControl=trctrl,
@@ -209,18 +210,23 @@ svm_Radial_Grid <- train(Farm ~., data = philrEnv, method = "svmRadial",
                     preProcess = c("center", "scale"),
                     tuneGrid = grid_radial,
                     tuneLength = 10)
+
+test_pred <- predict(svm_Radial_Grid, newdata = philrPig)
+test_pred
+
+confusionMatrix(PigSVMClass$Farm, test_pred)
 ```
 
 ```{r, Final Model creation used for pub}
 library(caret)
-set.seed(100)
+
 gc_ctrl1 <- trainControl(method = "repeatedcv",
                     number = 5,
                     repeats = 5,
                     classProbs = TRUE,
                     summaryFunction = twoClassSummary,
                     savePredictions = TRUE)
-
+set.seed(42)
 gc_train1 <- train(Farm~., philrEnv,
               method = "svmRadial",
               # train() use its default method of calculating an analytically derived estimate for sigma
@@ -252,9 +258,11 @@ g=ggplot(data = as.data.frame(cfm$table) ,
   scale_fill_gradient(low = "white", high = "steelblue") +
   geom_text(aes(x = Prediction, y = Reference, label = Freq)) +
   theme(legend.position = "none") +
-  ggtitle("Accuracy 86% Kappa 63%")
+  ggtitle("Accuracy 86% Kappa 66%")
 
 ggsave(file="~/PigLungs/PublicationFigures/ConfusionMatrix.PDF", g, width = 20, height = 20, units = "cm")
+
+saveRDS(gc_train1, "~/PigLungs/SVMmodel.RDS")
 
 #p = ggplotConfusionMatrix(cfm)
 
